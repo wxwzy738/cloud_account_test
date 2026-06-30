@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>导入运行结果校验</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand">
+          <span class="brand-mark">验</span>
+          <div>
+            <div class="brand-title">导入运行结果校验</div>
+            <div class="brand-subtitle" id="envSummary">本地环境 · /cloudaccount/importTestData/validateExcel</div>
+          </div>
+        </div>
+        <div class="header-actions">
+          <span class="request-chip" id="requestState">未运行</span>
+          <button class="ghost-button" id="downloadJsonButton" type="button" disabled>下载 JSON</button>
+        </div>
+      </div>
+      <nav class="tabs" id="tabs" aria-label="结果页签">
+        <button class="tab active" type="button" data-tab="config">系统配置</button>
+        <button class="tab" type="button" data-tab="overview">校验概况</button>
+      </nav>
+    </header>
+
+    <main class="app-main">
+      <section class="page active" id="page-config" data-page="config">
+        <div class="page-title-row">
+          <div>
+            <h1>系统配置</h1>
+            <p class="muted">选择环境、保存 Cookie、上传预期结果 Excel。</p>
+          </div>
+        </div>
+
+        <div class="config-grid">
+          <form class="config-form" id="configForm">
+            <div class="field-block">
+              <label class="field-label">访问环境</label>
+              <div class="segmented" id="environmentOptions">
+                <label class="segment active">
+                  <input type="radio" name="environment" value="local" checked />
+                  <span>本地环境</span>
+                </label>
+                <label class="segment">
+                  <input type="radio" name="environment" value="gray3" />
+                  <span>灰度3环境</span>
+                </label>
+              </div>
+              <div class="field-hint" id="baseUrlText">http://127.0.0.1:8080/</div>
+            </div>
+
+            <div class="field-block">
+              <label class="field-label" for="cookieInput">Cookie</label>
+              <textarea id="cookieInput" spellcheck="false" placeholder="粘贴接口访问使用的 Cookie"></textarea>
+            </div>
+
+            <div class="button-row">
+              <button class="secondary-button" id="saveConfigButton" type="submit">保存配置</button>
+              <span class="inline-status" id="saveConfigStatus"></span>
+            </div>
+          </form>
+
+          <form class="upload-form" id="uploadForm">
+            <label class="upload-box" id="dropZone">
+              <input id="fileInput" name="file" type="file" accept=".xlsx,.xls" />
+              <span class="upload-icon">↑</span>
+              <span class="upload-title" id="fileNameText">选择 Excel 文件</span>
+              <span class="upload-meta">POST /cloudaccount/importTestData/validateExcel</span>
+            </label>
+            <div class="button-row">
+              <button class="primary-button" id="validateButton" type="submit">开始校验</button>
+              <span class="inline-status" id="uploadStatus"></span>
+            </div>
+          </form>
+        </div>
+
+        <details class="json-import-panel">
+          <summary>接口返回 JSON</summary>
+          <form id="jsonImportForm">
+            <textarea id="jsonInput" spellcheck="false" placeholder="粘贴 validateExcel 返回 JSON"></textarea>
+            <div class="button-row">
+              <button class="secondary-button" id="renderJsonButton" type="submit">渲染 JSON</button>
+              <span class="inline-status" id="jsonImportStatus"></span>
+            </div>
+          </form>
+        </details>
+      </section>
+
+      <section class="page" id="page-overview" data-page="overview">
+        <div class="page-title-row">
+          <div>
+            <h1>校验概况</h1>
+            <p class="muted" id="overviewSubtitle">等待校验结果。</p>
+          </div>
+          <div class="toolbar">
+            <button class="secondary-button" id="focusFailedButton" type="button" disabled>只看异常 Sheet</button>
+          </div>
+        </div>
+
+        <div class="empty-state" id="overviewEmpty">
+          <div class="empty-title">暂无校验结果</div>
+          <div class="empty-text">在系统配置页上传 Excel 后，这里会展示整体行数、差异数和各 sheet 状态。</div>
+        </div>
+
+        <div class="overview-content hidden" id="overviewContent">
+          <div class="metric-grid" id="summaryMetrics"></div>
+          <div class="summary-layout">
+            <div class="table-wrap">
+              <table class="data-table" id="sheetSummaryTable">
+                <thead>
+                  <tr>
+                    <th>Sheet</th>
+                    <th title="rowCount：Excel 中读取到的数据行数">读取行</th>
+                    <th title="excelDataRowCount：能解析到平台订单号的行数">有效行</th>
+                    <th title="actualRowCount：主目标表查询到的数据库记录数">数据库行</th>
+                    <th title="matchedRowCount：所有目标对象和字段都匹配的行数">完全匹配行</th>
+                    <th title="存在字段值不一致的行数">字段差异行</th>
+                    <th title="missingActualRowCount：平台订单号为空或未匹配到数据库目标对象的行数">未匹配/空单号行</th>
+                    <th title="mismatchCount：字段值不一致的数量">差异字段</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <aside class="issue-panel" id="topIssuePanel"></aside>
+          </div>
+        </div>
+      </section>
+
+      <div id="sheetPages"></div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
