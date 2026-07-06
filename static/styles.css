@@ -383,6 +383,17 @@ input[type="text"] {
   outline: none;
 }
 
+select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  color: #1e2d40;
+  background: #fbfdff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+}
+
 .upload-form {
   display: grid;
   align-content: start;

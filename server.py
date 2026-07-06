@@ -37,9 +37,25 @@ ENVIRONMENTS = {
     },
 }
 
+COMPANIES = [
+    {
+        "name": "咖啡测试3",
+        "companyId": "10438",
+    },
+    {
+        "name": "德赛集团",
+        "companyId": "37041",
+    },
+]
+
+COMPANY_IDS = {company["companyId"] for company in COMPANIES}
+DEFAULT_COMPANY_BY_MODULE = {
+    "validate": "10438",
+    "documents": "37041",
+}
+
 DEFAULT_CONFIG = {
     "environment": "local",
-    "cookie": "",
 }
 
 SCHEMA_SOURCE_FILES = [
@@ -82,8 +98,6 @@ def load_config() -> dict[str, Any]:
     config = dict(DEFAULT_CONFIG)
     if data.get("environment") in ENVIRONMENTS:
         config["environment"] = data["environment"]
-    if isinstance(data.get("cookie"), str):
-        config["cookie"] = data["cookie"]
     return config
 
 
@@ -91,8 +105,6 @@ def save_config(config: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(DEFAULT_CONFIG)
     if config.get("environment") in ENVIRONMENTS:
         normalized["environment"] = config["environment"]
-    if isinstance(config.get("cookie"), str):
-        normalized["cookie"] = config["cookie"].strip()
 
     CONFIG_FILE.write_text(
         json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
@@ -184,6 +196,13 @@ def decode_target_response(raw: bytes) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return {"rawText": text}
+
+
+def normalize_company_id(value: Any) -> str:
+    company_id = str(value or "").strip()
+    if company_id not in COMPANY_IDS:
+        raise ValueError("请选择公司")
+    return company_id
 
 
 def clean_java_doc(lines: list[str]) -> str:
@@ -334,6 +353,8 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
                 {
                     "config": load_config(),
                     "environments": ENVIRONMENTS,
+                    "companies": COMPANIES,
+                    "defaultCompanyByModule": DEFAULT_COMPANY_BY_MODULE,
                     "validatePath": VALIDATE_PATH,
                     "documentQueryPath": DOCUMENT_QUERY_PATH,
                 }
@@ -426,10 +447,17 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
         config = save_config(
             {
                 "environment": environment,
-                "cookie": payload.get("cookie", ""),
             }
         )
-        self.send_json({"ok": True, "config": config, "environments": ENVIRONMENTS})
+        self.send_json(
+            {
+                "ok": True,
+                "config": config,
+                "environments": ENVIRONMENTS,
+                "companies": COMPANIES,
+                "defaultCompanyByModule": DEFAULT_COMPANY_BY_MODULE,
+            }
+        )
 
     def proxy_validate_request(self) -> None:
         try:
@@ -450,15 +478,18 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
-        cookie = fields.get("cookie")
-        if cookie is None:
-            cookie = config.get("cookie", "")
-        config = save_config({"environment": environment, "cookie": cookie})
+        try:
+            company_id = normalize_company_id(fields.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
 
         base_url = ENVIRONMENTS[environment]["baseUrl"]
         target_url = urljoin(base_url, VALIDATE_PATH.lstrip("/"))
         boundary, target_body = build_multipart(
-            {},
+            {"companyId": company_id},
             "file",
             upload_file["filename"] or "validate.xlsx",
             upload_file["content"],
@@ -472,8 +503,6 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             "User-Agent": self.server_version,
             "Referer": base_url,
         }
-        if config.get("cookie"):
-            headers["Cookie"] = config["cookie"]
 
         request = Request(target_url, data=target_body, headers=headers, method="POST")
         try:
@@ -526,21 +555,22 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
-        cookie = payload.get("cookie")
-        if cookie is None:
-            cookie = config.get("cookie", "")
-        config = save_config({"environment": environment, "cookie": cookie})
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
 
         base_url = ENVIRONMENTS[environment]["baseUrl"]
-        query_string = urlencode({"platformOrderNo": platform_order_no})
+        query_string = urlencode({"platformOrderNo": platform_order_no, "companyId": company_id})
         target_url = urljoin(base_url, DOCUMENT_QUERY_PATH.lstrip("/")) + "?" + query_string
         headers = {
             "Accept": "application/json, text/plain, */*",
             "User-Agent": self.server_version,
             "Referer": base_url,
         }
-        if config.get("cookie"):
-            headers["Cookie"] = config["cookie"]
 
         request = Request(target_url, headers=headers, method="GET")
         try:

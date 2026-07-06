@@ -1,6 +1,12 @@
 const state = {
-  config: { environment: "local", cookie: "" },
+  config: { environment: "local" },
   environments: {},
+  companies: [
+    { name: "咖啡测试3", companyId: "10438" },
+    { name: "德赛集团", companyId: "37041" },
+  ],
+  defaultCompanyByModule: { validate: "10438", documents: "37041" },
+  companyByModule: { validate: "10438", documents: "37041" },
   activeModule: "validate",
   lastTabs: { validate: "config", documents: "config" },
   validatePath: "/cloudaccount/importTestData/validateExcel",
@@ -31,7 +37,8 @@ const els = {
   uploadForm: document.getElementById("uploadForm"),
   documentQueryForm: document.getElementById("documentQueryForm"),
   jsonImportForm: document.getElementById("jsonImportForm"),
-  cookieInput: document.getElementById("cookieInput"),
+  companySelect: document.getElementById("companySelect"),
+  companyHint: document.getElementById("companyHint"),
   platformOrderInput: document.getElementById("platformOrderInput"),
   jsonInput: document.getElementById("jsonInput"),
   baseUrlText: document.getElementById("baseUrlText"),
@@ -39,6 +46,7 @@ const els = {
   configTitle: document.getElementById("configTitle"),
   configSubtitle: document.getElementById("configSubtitle"),
   documentQueryPathText: document.getElementById("documentQueryPathText"),
+  uploadPathText: document.getElementById("uploadPathText"),
   saveConfigStatus: document.getElementById("saveConfigStatus"),
   uploadStatus: document.getElementById("uploadStatus"),
   documentQueryStatus: document.getElementById("documentQueryStatus"),
@@ -230,6 +238,8 @@ init();
 
 async function init() {
   bindEvents();
+  renderCompanyOptions();
+  setCompanyForActiveModule(defaultCompanyForModule(state.activeModule));
   await Promise.all([loadConfig(), loadDocumentLabels()]);
   renderDocumentAll();
   switchModule("validate");
@@ -250,6 +260,8 @@ function bindEvents() {
   els.configForm.addEventListener("change", (event) => {
     if (event.target.name === "environment") {
       setEnvironment(event.target.value);
+    } else if (event.target === els.companySelect) {
+      setCompanyForActiveModule(event.target.value);
     }
   });
 
@@ -385,6 +397,12 @@ async function loadConfig() {
     const response = await fetch("/api/config");
     const payload = await response.json();
     state.environments = payload.environments || {};
+    state.companies = normalizeCompanies(payload.companies);
+    state.defaultCompanyByModule = {
+      ...state.defaultCompanyByModule,
+      ...(payload.defaultCompanyByModule || {}),
+    };
+    state.companyByModule = { ...state.defaultCompanyByModule };
     state.validatePath = payload.validatePath || state.validatePath;
     state.documentQueryPath = payload.documentQueryPath || state.documentQueryPath;
     applyConfig(payload.config || {});
@@ -412,10 +430,13 @@ async function ensureDocumentLabels() {
   await loadDocumentLabels();
 }
 
-function applyConfig(config) {
+function applyConfig(config, options = {}) {
   state.config = { ...state.config, ...config };
-  els.cookieInput.value = state.config.cookie || "";
+  renderCompanyOptions();
   setEnvironment(state.config.environment || "local");
+  if (options.resetCompany !== false) {
+    setCompanyForActiveModule(defaultCompanyForModule(state.activeModule));
+  }
 }
 
 function setEnvironment(value) {
@@ -428,8 +449,7 @@ function setEnvironment(value) {
   const env = state.environments[value] || {};
   const baseUrl = env.baseUrl || "";
   els.baseUrlText.textContent = baseUrl;
-  updateEnvSummary();
-  els.documentQueryPathText.textContent = `GET ${state.documentQueryPath}`;
+  updateRequestText();
 }
 
 function getSelectedEnvironment() {
@@ -444,6 +464,55 @@ function updateEnvSummary() {
   els.envSummary.textContent = `${env.label || state.config.environment} · ${baseUrl}${path.replace(/^\//, "")}`;
 }
 
+function normalizeCompanies(companies) {
+  if (!Array.isArray(companies) || companies.length === 0) {
+    return state.companies;
+  }
+  const normalized = companies
+    .map((company) => ({
+      name: String(company.name || company.label || "").trim(),
+      companyId: String(company.companyId || company.value || "").trim(),
+    }))
+    .filter((company) => company.name && company.companyId);
+  return normalized.length > 0 ? normalized : state.companies;
+}
+
+function renderCompanyOptions() {
+  els.companySelect.innerHTML = state.companies
+    .map((company) => `<option value="${escapeAttr(company.companyId)}">${escapeHtml(company.name)}</option>`)
+    .join("");
+}
+
+function defaultCompanyForModule(module) {
+  return state.defaultCompanyByModule[module] || state.companies[0]?.companyId || "";
+}
+
+function selectedCompanyId() {
+  return state.companyByModule[state.activeModule] || defaultCompanyForModule(state.activeModule);
+}
+
+function selectedCompany() {
+  const companyId = selectedCompanyId();
+  return state.companies.find((company) => company.companyId === companyId) || { name: "未选择公司", companyId };
+}
+
+function setCompanyForActiveModule(companyId) {
+  const normalizedCompanyId = String(companyId || "").trim();
+  state.companyByModule[state.activeModule] = normalizedCompanyId;
+  if (els.companySelect.value !== normalizedCompanyId) {
+    els.companySelect.value = normalizedCompanyId;
+  }
+  updateRequestText();
+}
+
+function updateRequestText() {
+  updateEnvSummary();
+  const company = selectedCompany();
+  els.companyHint.textContent = company.companyId ? `companyId=${company.companyId}` : "请选择公司";
+  els.uploadPathText.textContent = `POST ${state.validatePath} · companyId=${company.companyId || "-"}`;
+  els.documentQueryPathText.textContent = `GET ${state.documentQueryPath}?platformOrderNo=...&companyId=${company.companyId || "-"}`;
+}
+
 async function saveConfig() {
   setInlineStatus(els.saveConfigStatus, "保存中...");
   try {
@@ -452,14 +521,13 @@ async function saveConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         environment: getSelectedEnvironment(),
-        cookie: els.cookieInput.value,
       }),
     });
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
       throw new Error(payload.message || "保存失败");
     }
-    applyConfig(payload.config);
+    applyConfig(payload.config, { resetCompany: false });
     setInlineStatus(els.saveConfigStatus, "已保存", "success");
     showToast("配置已保存");
   } catch (error) {
@@ -481,7 +549,7 @@ async function validateExcel() {
 
   const formData = new FormData();
   formData.append("environment", getSelectedEnvironment());
-  formData.append("cookie", els.cookieInput.value);
+  formData.append("companyId", selectedCompanyId());
   formData.append("file", file);
 
   try {
@@ -532,7 +600,7 @@ async function queryDocumentByPlatformOrderNo() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         environment: getSelectedEnvironment(),
-        cookie: els.cookieInput.value,
+        companyId: selectedCompanyId(),
         platformOrderNo,
       }),
     });
@@ -1443,6 +1511,7 @@ function switchModule(module) {
   if (!["validate", "documents"].includes(module)) return;
   state.activeModule = module;
   document.body.dataset.module = module;
+  setCompanyForActiveModule(defaultCompanyForModule(module));
 
   document.querySelectorAll("[data-module-switch]").forEach((button) => {
     button.classList.toggle("active", button.dataset.moduleSwitch === module);
@@ -1453,8 +1522,8 @@ function switchModule(module) {
 
   els.configTitle.textContent = module === "documents" ? "系统配置" : "系统配置";
   els.configSubtitle.textContent = module === "documents"
-    ? "选择环境、保存 Cookie、输入平台订单号查询单据。"
-    : "选择环境、保存 Cookie、上传预期结果 Excel。";
+    ? "选择环境和公司，输入平台订单号查询单据。"
+    : "选择环境和公司，上传预期结果 Excel。";
 
   document.querySelector(".brand-mark").textContent = module === "documents" ? "单" : "验";
   document.querySelector(".brand-title").textContent = module === "documents" ? "导入运行结果单据查看" : "导入运行结果校验";
