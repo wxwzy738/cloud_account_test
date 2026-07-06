@@ -11,6 +11,8 @@ const state = {
   documentRawResponse: null,
   documentPlatformOrderNo: "",
   documentLabels: {},
+  documentModelLabels: {},
+  documentLabelsLoaded: false,
   documentFilters: new Map(),
   sheetEntries: [],
   sheetByTabId: new Map(),
@@ -69,8 +71,8 @@ const DOCUMENT_GROUPS = [
     key: "originalOrder",
     title: "原始订单",
     collections: [
-      { path: ["originalOrder", "tradeList"], title: "ERP 原始主订单" },
-      { path: ["originalOrder", "orderList"], title: "ERP 原始子订单" },
+      { path: ["originalOrder", "tradeList"], title: "ERP 原始主订单", model: "ErpTradeDO" },
+      { path: ["originalOrder", "orderList"], title: "ERP 原始子订单", model: "ErpOrderDO" },
     ],
   },
   {
@@ -78,67 +80,67 @@ const DOCUMENT_GROUPS = [
     key: "originalAfterSale",
     title: "原始售后",
     collections: [
-      { path: ["originalAfterSale", "workOrderList"], title: "ERP 原始售后工单" },
-      { path: ["originalAfterSale", "reissueOrRefundList"], title: "ERP 原始补发退货明细" },
-      { path: ["originalAfterSale", "itemSnapshotList"], title: "ERP 原始售后商品快照" },
+      { path: ["originalAfterSale", "workOrderList"], title: "ERP 原始售后工单", model: "ErpWorkOrderDO" },
+      { path: ["originalAfterSale", "reissueOrRefundList"], title: "ERP 原始补发退货明细", model: "ErpReissueOrRefundDO" },
+      { path: ["originalAfterSale", "itemSnapshotList"], title: "ERP 原始售后商品快照", model: "ErpItemSnapshotDO" },
     ],
   },
   {
     tabId: "doc-standardFundBillList",
     key: "standardFundBillList",
     title: "标准资金账单",
-    collections: [{ path: ["standardFundBillList"], title: "标准资金账单" }],
+    collections: [{ path: ["standardFundBillList"], title: "标准资金账单", model: "YzStandardFundBillFlowInfoDO" }],
   },
   {
     tabId: "doc-orderStream",
     key: "orderStream",
     title: "出入库流水明细",
     collections: [
-      { path: ["orderStream", "detailList"], title: "出入库流水明细" },
-      { path: ["orderStream", "extList"], title: "出入库流水扩展属性" },
+      { path: ["orderStream", "detailList"], title: "出入库流水明细", model: "YzOrderStreamDetailDO" },
+      { path: ["orderStream", "extList"], title: "出入库流水扩展属性", model: "YzOrderStreamExtDO" },
     ],
   },
   {
     tabId: "doc-arReconciliationList",
     key: "arReconciliationList",
     title: "应收对账表",
-    collections: [{ path: ["arReconciliationList"], title: "应收对账表" }],
+    collections: [{ path: ["arReconciliationList"], title: "应收对账表", model: "YzArReconciliationDO" }],
   },
   {
     tabId: "doc-manualVerifyRecordList",
     key: "manualVerifyRecordList",
     title: "账单手动核销",
-    collections: [{ path: ["manualVerifyRecordList"], title: "账单手动核销" }],
+    collections: [{ path: ["manualVerifyRecordList"], title: "账单手动核销", model: "YzManualVerifyRecordDO" }],
   },
   {
     tabId: "doc-arAdjustmentRecordList",
     key: "arAdjustmentRecordList",
     title: "应收手动调整",
-    collections: [{ path: ["arAdjustmentRecordList"], title: "应收手动调整" }],
+    collections: [{ path: ["arAdjustmentRecordList"], title: "应收手动调整", model: "YzArAdjustmentRecordDO" }],
   },
   {
     tabId: "doc-issuedBalanceProcessList",
     key: "issuedBalanceProcessList",
     title: "发出余额处理",
-    collections: [{ path: ["issuedBalanceProcessList"], title: "发出余额处理" }],
+    collections: [{ path: ["issuedBalanceProcessList"], title: "发出余额处理", model: "YzIssuedBalanceProcessDO" }],
   },
   {
     tabId: "doc-afterSalesExceptionList",
     key: "afterSalesExceptionList",
     title: "售后差异监控",
-    collections: [{ path: ["afterSalesExceptionList"], title: "售后差异监控" }],
+    collections: [{ path: ["afterSalesExceptionList"], title: "售后差异监控", model: "YzAfterSalesExceptionDO" }],
   },
   {
     tabId: "doc-refundOnlyTrackingList",
     key: "refundOnlyTrackingList",
     title: "仅退款追踪",
-    collections: [{ path: ["refundOnlyTrackingList"], title: "仅退款追踪" }],
+    collections: [{ path: ["refundOnlyTrackingList"], title: "仅退款追踪", model: "YzRefundOnlyTrackingDO" }],
   },
   {
     tabId: "doc-issuedBalanceDetailList",
     key: "issuedBalanceDetailList",
     title: "发出余额明细",
-    collections: [{ path: ["issuedBalanceDetailList"], title: "发出余额明细" }],
+    collections: [{ path: ["issuedBalanceDetailList"], title: "发出余额明细", model: "YzIssuedBalanceDetailDO" }],
   },
 ];
 
@@ -159,6 +161,17 @@ const FALLBACK_FIELD_LABELS = {
   skuCode: "商品编码",
   productName: "商品名称",
   amount: "金额",
+  receivableAdjustAmt: "应收调整金额",
+  adjustReason: "调整原因",
+  receivedAmount: "到账金额",
+  buyerPaidReceivedAmount: "到账实付金额",
+  receivedSubsidyAmount: "到账补贴金额",
+  diffAmount: "合计差额",
+  afterSaleDiffSituation: "售后差异情况",
+  fundDataId: "资金数据ID",
+  verifyTime: "核销时间",
+  verifyNo: "核销单号",
+  streamId: "关联出入库流水ID",
   remark: "备注",
 };
 
@@ -385,9 +398,18 @@ async function loadDocumentLabels() {
     const response = await fetch("/api/document-labels");
     const payload = await response.json();
     state.documentLabels = { ...FALLBACK_FIELD_LABELS, ...(payload.labels || {}) };
+    state.documentModelLabels = payload.models || {};
+    state.documentLabelsLoaded = Boolean(payload.labels || payload.models);
   } catch (error) {
     state.documentLabels = { ...FALLBACK_FIELD_LABELS };
+    state.documentModelLabels = {};
+    state.documentLabelsLoaded = false;
   }
+}
+
+async function ensureDocumentLabels() {
+  if (state.documentLabelsLoaded) return;
+  await loadDocumentLabels();
 }
 
 function applyConfig(config) {
@@ -526,6 +548,7 @@ async function queryDocumentByPlatformOrderNo() {
     }
 
     state.documentPlatformOrderNo = platformOrderNo;
+    await ensureDocumentLabels();
     acceptDocumentResponse(proxyPayload.response, unwrapped);
     setRequestState(unwrapped.error ? "error" : "success", unwrapped.error ? "接口异常" : "查询完成");
     setInlineStatus(els.documentQueryStatus, `HTTP ${proxyPayload.targetStatus} · ${totalDocumentRecordCount()} 条记录`, "success");
@@ -694,7 +717,7 @@ function renderDocumentPage(group) {
   const filter = ensureDocumentFilter(group.tabId);
   const total = collectionTotal(collections);
   const visibleTotal = collections.reduce((sum, collection) => {
-    return sum + filterDocumentRecords(collection.records, filter).length;
+    return sum + filterDocumentRecords(collection.records, filter, collection.model).length;
   }, 0);
   return `
     <section class="page ${state.activeTab === group.tabId ? "active" : ""}" id="page-${escapeAttr(group.tabId)}" data-page="${escapeAttr(group.tabId)}">
@@ -734,7 +757,7 @@ function renderDocumentCollections(collections, filter) {
 }
 
 function renderDocumentCollection(collection, filter) {
-  const records = filterDocumentRecords(collection.records, filter);
+  const records = filterDocumentRecords(collection.records, filter, collection.model);
   const fields = collectDocumentFields(collection.records);
   return `
     <section class="document-section">
@@ -749,7 +772,7 @@ function renderDocumentCollection(collection, filter) {
           <table class="data-table document-table">
             <thead>
               <tr>
-                ${fields.map((field) => renderDocumentHeader(field)).join("")}
+                ${fields.map((field) => renderDocumentHeader(field, collection.model)).join("")}
               </tr>
             </thead>
             <tbody>
@@ -766,8 +789,8 @@ function renderDocumentCollection(collection, filter) {
   `;
 }
 
-function renderDocumentHeader(field) {
-  const label = fieldLabel(field);
+function renderDocumentHeader(field, model) {
+  const label = fieldLabel(field, model);
   return `
     <th title="${escapeAttr(label)}">
       <span class="document-field-label">${escapeHtml(compactLabel(label))}</span>
@@ -1230,16 +1253,16 @@ function collectDocumentFields(records) {
   return fields;
 }
 
-function filterDocumentRecords(records, filter) {
+function filterDocumentRecords(records, filter, model = "") {
   const query = (filter.query || "").toLowerCase();
   if (!query) return records;
-  return records.filter((record) => documentRecordSearchText(record).includes(query));
+  return records.filter((record) => documentRecordSearchText(record, model).includes(query));
 }
 
-function documentRecordSearchText(record) {
+function documentRecordSearchText(record, model = "") {
   const parts = [JSON.stringify(record)];
   Object.keys(record || {}).forEach((field) => {
-    parts.push(field, fieldLabel(field), fieldAliases(field));
+    parts.push(field, fieldLabel(field, model), fieldAliases(field));
   });
   return parts.join(" ").toLowerCase();
 }
@@ -1271,7 +1294,10 @@ function ensureDocumentFilter(tabId) {
   return state.documentFilters.get(tabId);
 }
 
-function fieldLabel(field) {
+function fieldLabel(field, model = "") {
+  if (model && state.documentModelLabels[model] && state.documentModelLabels[model][field]) {
+    return state.documentModelLabels[model][field];
+  }
   return state.documentLabels[field] || FALLBACK_FIELD_LABELS[field] || field;
 }
 

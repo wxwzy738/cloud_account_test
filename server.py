@@ -65,6 +65,11 @@ SCHEMA_SOURCE_FILES = [
     KMERP_ROOT / "kmerp-account-core/src/main/java/com/raycloud/dmj/account/core/common/BaseInfo.java",
 ]
 
+SCHEMA_SOURCE_ROOTS = [
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/imports/dto",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain",
+]
+
 
 def load_config() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
@@ -209,7 +214,35 @@ def schema_description(annotation_line: str) -> str:
     return ""
 
 
-def extract_field_labels() -> dict[str, str]:
+def collect_schema_source_files() -> list[Path]:
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for file_path in SCHEMA_SOURCE_FILES:
+        if file_path.exists() and file_path not in seen:
+            files.append(file_path)
+            seen.add(file_path)
+
+    for source_root in SCHEMA_SOURCE_ROOTS:
+        if not source_root.exists():
+            continue
+        for file_path in sorted(source_root.rglob("*.java")):
+            if file_path not in seen:
+                files.append(file_path)
+                seen.add(file_path)
+    return files
+
+
+def class_name_from_source(lines: list[str], fallback: str) -> str:
+    for line in lines:
+        tokens = line.replace("{", " { ").split()
+        if "class" in tokens:
+            index = tokens.index("class")
+            if index + 1 < len(tokens):
+                return tokens[index + 1].strip()
+    return fallback
+
+
+def extract_schema_labels() -> dict[str, Any]:
     labels = {
         "created": "创建时间",
         "modified": "更新时间",
@@ -219,8 +252,11 @@ def extract_field_labels() -> dict[str, str]:
         "isDeleted": "逻辑删除",
         "deletedVersion": "逻辑删除版本号",
     }
+    models: dict[str, dict[str, str]] = {}
 
-    for file_path in SCHEMA_SOURCE_FILES:
+    schema_source_files = collect_schema_source_files()
+    explicit_source_files = set(SCHEMA_SOURCE_FILES)
+    for file_path in schema_source_files:
         if not file_path.exists():
             continue
         try:
@@ -228,6 +264,8 @@ def extract_field_labels() -> dict[str, str]:
         except OSError:
             continue
 
+        class_name = class_name_from_source(lines, file_path.stem)
+        model_labels = models.setdefault(class_name, {})
         comment_lines: list[str] = []
         pending_comment = ""
         pending_schema = ""
@@ -270,11 +308,17 @@ def extract_field_labels() -> dict[str, str]:
 
             label = pending_schema or pending_comment
             if label:
-                labels[field_name] = label
+                model_labels[field_name] = label
+                if field_name not in labels or file_path in explicit_source_files:
+                    labels[field_name] = label
             pending_comment = ""
             pending_schema = ""
 
-    return labels
+    return {
+        "labels": labels,
+        "models": models,
+        "sourceCount": len(schema_source_files),
+    }
 
 
 class ValidateViewerHandler(BaseHTTPRequestHandler):
@@ -296,7 +340,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/document-labels":
-            self.send_json({"labels": extract_field_labels()})
+            self.send_json(extract_schema_labels())
             return
         if path == "/api/health":
             self.send_json({"ok": True})
