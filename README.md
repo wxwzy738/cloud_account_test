@@ -1,4 +1,4 @@
-# 导入运行结果校验页面
+# 导入运行结果校验/单据查看页面
 
 本地启动：
 
@@ -12,10 +12,18 @@ python3 server.py --port 8070
 http://127.0.0.1:8070/
 ```
 
-页面会把 Excel 文件以 `file` 字段上传到：
+页面左侧有两个菜单：
+
+- 导入校验：把 Excel 文件以 `file` 字段上传到：
 
 ```text
 /cloudaccount/importTestData/validateExcel
+```
+
+- 查看单据：按平台订单号查询导入执行后的单据信息：
+
+```text
+/cloudaccount/importTestData/platformOrderNo
 ```
 
 支持的环境：
@@ -23,4 +31,4 @@ http://127.0.0.1:8070/
 - 本地环境：`http://127.0.0.1:8080/`
 - 灰度3环境：`https://pubcloud3.superboss.cc/`
 
-Cookie 会保存到本目录的 `config.json`，该文件已加入 `.gitignore`。
+访问环境和 Cookie 共用同一份配置，会保存到本目录的 `config.json`，该文件已加入 `.gitignore`。

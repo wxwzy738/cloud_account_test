@@ -6,7 +6,7 @@
     <title>导入运行结果校验</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-module="validate">
     <header class="app-header">
       <div class="header-inner">
         <div class="brand">
@@ -21,18 +21,38 @@
           <button class="ghost-button" id="downloadJsonButton" type="button" disabled>下载 JSON</button>
         </div>
       </div>
-      <nav class="tabs" id="tabs" aria-label="结果页签">
-        <button class="tab active" type="button" data-tab="config">系统配置</button>
-        <button class="tab" type="button" data-tab="overview">校验概况</button>
-      </nav>
     </header>
 
-    <main class="app-main">
+    <main class="app-shell">
+      <aside class="module-sidebar" aria-label="主菜单">
+        <button class="module-menu active" type="button" data-module-switch="validate">导入校验</button>
+        <button class="module-menu" type="button" data-module-switch="documents">查看单据</button>
+      </aside>
+
+      <div class="workspace">
+        <nav class="tabs" id="tabs" aria-label="功能页签">
+          <button class="tab active" type="button" data-module="validate" data-tab="config">系统配置</button>
+          <button class="tab" type="button" data-module="validate" data-tab="overview">校验概况</button>
+          <button class="tab" type="button" data-module="documents" data-tab="config">系统配置</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-overview">单据概况</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-originalOrder">原始订单</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-originalAfterSale">原始售后</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-standardFundBillList">标准资金账单</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-orderStream">出入库流水明细</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-arReconciliationList">应收对账表</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-manualVerifyRecordList">账单手动核销</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-arAdjustmentRecordList">应收手动调整</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-issuedBalanceProcessList">发出余额处理</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-afterSalesExceptionList">售后差异监控</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-refundOnlyTrackingList">仅退款追踪</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-issuedBalanceDetailList">发出余额明细</button>
+        </nav>
+
       <section class="page active" id="page-config" data-page="config">
         <div class="page-title-row">
           <div>
-            <h1>系统配置</h1>
-            <p class="muted">选择环境、保存 Cookie、上传预期结果 Excel。</p>
+            <h1 id="configTitle">系统配置</h1>
+            <p class="muted" id="configSubtitle">选择环境、保存 Cookie、上传预期结果 Excel。</p>
           </div>
         </div>
 
@@ -64,7 +84,7 @@
             </div>
           </form>
 
-          <form class="upload-form" id="uploadForm">
+          <form class="upload-form" id="uploadForm" data-module-panel="validate">
             <label class="upload-box" id="dropZone">
               <input id="fileInput" name="file" type="file" accept=".xlsx,.xls" />
               <span class="upload-icon">↑</span>
@@ -76,9 +96,21 @@
               <span class="inline-status" id="uploadStatus"></span>
             </div>
           </form>
+
+          <form class="document-query-form" id="documentQueryForm" data-module-panel="documents">
+            <div class="field-block">
+              <label class="field-label" for="platformOrderInput">平台订单号</label>
+              <input id="platformOrderInput" type="text" autocomplete="off" placeholder="请输入平台订单号" />
+              <div class="field-hint" id="documentQueryPathText">GET /cloudaccount/importTestData/platformOrderNo</div>
+            </div>
+            <div class="button-row">
+              <button class="primary-button" id="documentQueryButton" type="submit">查询</button>
+              <span class="inline-status" id="documentQueryStatus"></span>
+            </div>
+          </form>
         </div>
 
-        <details class="json-import-panel">
+        <details class="json-import-panel" data-module-panel="validate">
           <summary>接口返回 JSON</summary>
           <form id="jsonImportForm">
             <textarea id="jsonInput" spellcheck="false" placeholder="粘贴 validateExcel 返回 JSON"></textarea>
@@ -133,6 +165,41 @@
       </section>
 
       <div id="sheetPages"></div>
+      <section class="page" id="page-doc-overview" data-page="doc-overview">
+        <div class="page-title-row">
+          <div>
+            <h1>单据概况</h1>
+            <p class="muted" id="documentOverviewSubtitle">输入平台订单号查询后，这里会展示各单据记录数。</p>
+          </div>
+          <div class="toolbar">
+            <button class="secondary-button" id="documentBackToQueryButton" type="button" data-switch-tab="config">返回查询</button>
+          </div>
+        </div>
+
+        <div class="empty-state" id="documentOverviewEmpty">
+          <div class="empty-title">暂无单据结果</div>
+          <div class="empty-text">在系统配置页输入平台订单号并查询后，这里会展示原始订单、售后、资金账单、出入库流水等单据信息。</div>
+        </div>
+
+        <div class="overview-content hidden" id="documentOverviewContent">
+          <div class="metric-grid" id="documentSummaryMetrics"></div>
+          <div class="table-wrap">
+            <table class="data-table document-summary-table" id="documentSummaryTable">
+              <thead>
+                <tr>
+                  <th>单据</th>
+                  <th>记录数</th>
+                  <th>明细分组</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <div id="documentPages"></div>
+      </div>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

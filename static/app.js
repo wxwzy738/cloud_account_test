@@ -1,9 +1,17 @@
 const state = {
   config: { environment: "local", cookie: "" },
   environments: {},
+  activeModule: "validate",
+  lastTabs: { validate: "config", documents: "config" },
   validatePath: "/cloudaccount/importTestData/validateExcel",
+  documentQueryPath: "/cloudaccount/importTestData/platformOrderNo",
   result: null,
   rawResponse: null,
+  documentResult: null,
+  documentRawResponse: null,
+  documentPlatformOrderNo: "",
+  documentLabels: {},
+  documentFilters: new Map(),
   sheetEntries: [],
   sheetByTabId: new Map(),
   sheetFilters: new Map(),
@@ -16,20 +24,28 @@ const state = {
 const els = {
   tabs: document.getElementById("tabs"),
   sheetPages: document.getElementById("sheetPages"),
+  documentPages: document.getElementById("documentPages"),
   configForm: document.getElementById("configForm"),
   uploadForm: document.getElementById("uploadForm"),
+  documentQueryForm: document.getElementById("documentQueryForm"),
   jsonImportForm: document.getElementById("jsonImportForm"),
   cookieInput: document.getElementById("cookieInput"),
+  platformOrderInput: document.getElementById("platformOrderInput"),
   jsonInput: document.getElementById("jsonInput"),
   baseUrlText: document.getElementById("baseUrlText"),
   envSummary: document.getElementById("envSummary"),
+  configTitle: document.getElementById("configTitle"),
+  configSubtitle: document.getElementById("configSubtitle"),
+  documentQueryPathText: document.getElementById("documentQueryPathText"),
   saveConfigStatus: document.getElementById("saveConfigStatus"),
   uploadStatus: document.getElementById("uploadStatus"),
+  documentQueryStatus: document.getElementById("documentQueryStatus"),
   jsonImportStatus: document.getElementById("jsonImportStatus"),
   fileInput: document.getElementById("fileInput"),
   fileNameText: document.getElementById("fileNameText"),
   dropZone: document.getElementById("dropZone"),
   validateButton: document.getElementById("validateButton"),
+  documentQueryButton: document.getElementById("documentQueryButton"),
   requestState: document.getElementById("requestState"),
   overviewEmpty: document.getElementById("overviewEmpty"),
   overviewContent: document.getElementById("overviewContent"),
@@ -39,12 +55,117 @@ const els = {
   topIssuePanel: document.getElementById("topIssuePanel"),
   focusFailedButton: document.getElementById("focusFailedButton"),
   downloadJsonButton: document.getElementById("downloadJsonButton"),
+  documentOverviewEmpty: document.getElementById("documentOverviewEmpty"),
+  documentOverviewContent: document.getElementById("documentOverviewContent"),
+  documentOverviewSubtitle: document.getElementById("documentOverviewSubtitle"),
+  documentSummaryMetrics: document.getElementById("documentSummaryMetrics"),
+  documentSummaryTable: document.getElementById("documentSummaryTable"),
   toast: document.getElementById("toast"),
+};
+
+const DOCUMENT_GROUPS = [
+  {
+    tabId: "doc-originalOrder",
+    key: "originalOrder",
+    title: "原始订单",
+    collections: [
+      { path: ["originalOrder", "tradeList"], title: "ERP 原始主订单" },
+      { path: ["originalOrder", "orderList"], title: "ERP 原始子订单" },
+    ],
+  },
+  {
+    tabId: "doc-originalAfterSale",
+    key: "originalAfterSale",
+    title: "原始售后",
+    collections: [
+      { path: ["originalAfterSale", "workOrderList"], title: "ERP 原始售后工单" },
+      { path: ["originalAfterSale", "reissueOrRefundList"], title: "ERP 原始补发退货明细" },
+      { path: ["originalAfterSale", "itemSnapshotList"], title: "ERP 原始售后商品快照" },
+    ],
+  },
+  {
+    tabId: "doc-standardFundBillList",
+    key: "standardFundBillList",
+    title: "标准资金账单",
+    collections: [{ path: ["standardFundBillList"], title: "标准资金账单" }],
+  },
+  {
+    tabId: "doc-orderStream",
+    key: "orderStream",
+    title: "出入库流水明细",
+    collections: [
+      { path: ["orderStream", "detailList"], title: "出入库流水明细" },
+      { path: ["orderStream", "extList"], title: "出入库流水扩展属性" },
+    ],
+  },
+  {
+    tabId: "doc-arReconciliationList",
+    key: "arReconciliationList",
+    title: "应收对账表",
+    collections: [{ path: ["arReconciliationList"], title: "应收对账表" }],
+  },
+  {
+    tabId: "doc-manualVerifyRecordList",
+    key: "manualVerifyRecordList",
+    title: "账单手动核销",
+    collections: [{ path: ["manualVerifyRecordList"], title: "账单手动核销" }],
+  },
+  {
+    tabId: "doc-arAdjustmentRecordList",
+    key: "arAdjustmentRecordList",
+    title: "应收手动调整",
+    collections: [{ path: ["arAdjustmentRecordList"], title: "应收手动调整" }],
+  },
+  {
+    tabId: "doc-issuedBalanceProcessList",
+    key: "issuedBalanceProcessList",
+    title: "发出余额处理",
+    collections: [{ path: ["issuedBalanceProcessList"], title: "发出余额处理" }],
+  },
+  {
+    tabId: "doc-afterSalesExceptionList",
+    key: "afterSalesExceptionList",
+    title: "售后差异监控",
+    collections: [{ path: ["afterSalesExceptionList"], title: "售后差异监控" }],
+  },
+  {
+    tabId: "doc-refundOnlyTrackingList",
+    key: "refundOnlyTrackingList",
+    title: "仅退款追踪",
+    collections: [{ path: ["refundOnlyTrackingList"], title: "仅退款追踪" }],
+  },
+  {
+    tabId: "doc-issuedBalanceDetailList",
+    key: "issuedBalanceDetailList",
+    title: "发出余额明细",
+    collections: [{ path: ["issuedBalanceDetailList"], title: "发出余额明细" }],
+  },
+];
+
+const FALLBACK_FIELD_LABELS = {
+  id: "主键ID",
+  companyId: "公司ID",
+  created: "创建时间",
+  modified: "更新时间",
+  createdAt: "创建时间",
+  updatedAt: "更新时间",
+  platformOrderNo: "平台订单号",
+  orderNo: "平台订单号",
+  tid: "平台订单号",
+  sid: "系统订单号",
+  oid: "子订单号",
+  shopId: "店铺ID",
+  shopName: "店铺名称",
+  skuCode: "商品编码",
+  productName: "商品名称",
+  amount: "金额",
+  remark: "备注",
 };
 
 window.__validateViewer = {
   renderResponse(response) {
     const unwrapped = acceptValidateResponse(response);
+    switchModule("validate");
     switchTab("overview");
     els.downloadJsonButton.disabled = false;
     return {
@@ -54,11 +175,24 @@ window.__validateViewer = {
       error: unwrapped.error,
     };
   },
+  renderDocumentResponse(response) {
+    const unwrapped = acceptDocumentResponse(response);
+    switchModule("documents");
+    switchTab("doc-overview");
+    els.downloadJsonButton.disabled = false;
+    return {
+      documentCount: totalDocumentRecordCount(),
+      platformOrderNo: state.documentPlatformOrderNo,
+      error: unwrapped.error,
+    };
+  },
   inspect() {
     return {
+      activeModule: state.activeModule,
       activeTab: state.activeTab,
       sheetCount: state.sheetEntries.length,
       hasResult: Boolean(state.result),
+      hasDocumentResult: Boolean(state.documentResult),
     };
   },
 };
@@ -71,18 +205,32 @@ window.addEventListener("validate-viewer:render-response", (event) => {
   }
 });
 
+window.addEventListener("document-viewer:render-response", (event) => {
+  try {
+    window.__validateViewer.renderDocumentResponse(event.detail);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
 init();
 
 async function init() {
   bindEvents();
-  await loadConfig();
-  switchTab("config");
+  await Promise.all([loadConfig(), loadDocumentLabels()]);
+  renderDocumentAll();
+  switchModule("validate");
 }
 
 function bindEvents() {
+  document.querySelectorAll("[data-module-switch]").forEach((button) => {
+    button.addEventListener("click", () => switchModule(button.dataset.moduleSwitch));
+  });
+
   els.tabs.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-tab]");
     if (!tab) return;
+    if (tab.dataset.module && tab.dataset.module !== state.activeModule) return;
     switchTab(tab.dataset.tab);
   });
 
@@ -100,6 +248,11 @@ function bindEvents() {
   els.uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await validateExcel();
+  });
+
+  els.documentQueryForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await queryDocumentByPlatformOrderNo();
   });
 
   els.jsonImportForm.addEventListener("submit", (event) => {
@@ -182,11 +335,23 @@ function bindEvents() {
 
   document.addEventListener("input", (event) => {
     const search = event.target.closest("[data-row-search]");
-    if (!search) return;
-    const tabId = search.dataset.tabId;
-    const filter = ensureSheetFilter(tabId);
-    filter.query = search.value.trim();
-    renderSheetRows(tabId);
+    if (search) {
+      const tabId = search.dataset.tabId;
+      const filter = ensureSheetFilter(tabId);
+      filter.query = search.value.trim();
+      renderSheetRows(tabId);
+      return;
+    }
+
+    const documentSearch = event.target.closest("[data-document-search]");
+    if (documentSearch) {
+      const tabId = documentSearch.dataset.tabId;
+      const filter = ensureDocumentFilter(tabId);
+      filter.query = documentSearch.value.trim();
+      renderDocumentPages();
+      switchTab(tabId);
+      restoreDocumentSearchFocus(tabId);
+    }
   });
 
   document.addEventListener("change", (event) => {
@@ -208,9 +373,20 @@ async function loadConfig() {
     const payload = await response.json();
     state.environments = payload.environments || {};
     state.validatePath = payload.validatePath || state.validatePath;
+    state.documentQueryPath = payload.documentQueryPath || state.documentQueryPath;
     applyConfig(payload.config || {});
   } catch (error) {
     showToast(`配置读取失败：${error.message}`);
+  }
+}
+
+async function loadDocumentLabels() {
+  try {
+    const response = await fetch("/api/document-labels");
+    const payload = await response.json();
+    state.documentLabels = { ...FALLBACK_FIELD_LABELS, ...(payload.labels || {}) };
+  } catch (error) {
+    state.documentLabels = { ...FALLBACK_FIELD_LABELS };
   }
 }
 
@@ -230,12 +406,20 @@ function setEnvironment(value) {
   const env = state.environments[value] || {};
   const baseUrl = env.baseUrl || "";
   els.baseUrlText.textContent = baseUrl;
-  els.envSummary.textContent = `${env.label || value} · ${baseUrl}${state.validatePath.replace(/^\//, "")}`;
+  updateEnvSummary();
+  els.documentQueryPathText.textContent = `GET ${state.documentQueryPath}`;
 }
 
 function getSelectedEnvironment() {
   const selected = document.querySelector("input[name='environment']:checked");
   return selected ? selected.value : "local";
+}
+
+function updateEnvSummary() {
+  const env = state.environments[state.config.environment] || {};
+  const baseUrl = env.baseUrl || "";
+  const path = state.activeModule === "documents" ? state.documentQueryPath : state.validatePath;
+  els.envSummary.textContent = `${env.label || state.config.environment} · ${baseUrl}${path.replace(/^\//, "")}`;
 }
 
 async function saveConfig() {
@@ -309,6 +493,54 @@ async function validateExcel() {
   }
 }
 
+async function queryDocumentByPlatformOrderNo() {
+  const platformOrderNo = els.platformOrderInput.value.trim();
+  if (!platformOrderNo) {
+    showToast("请输入平台订单号");
+    return;
+  }
+
+  setRequestState("running", "查询中");
+  els.documentQueryButton.disabled = true;
+  setInlineStatus(els.documentQueryStatus, "正在查询单据...");
+
+  try {
+    const response = await fetch("/api/document-query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        cookie: els.cookieInput.value,
+        platformOrderNo,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      const message = proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`;
+      throw new Error(message);
+    }
+
+    const unwrapped = unwrapDocumentResponse(proxyPayload.response);
+    if (!unwrapped.data) {
+      throw new Error(unwrapped.error || "接口返回中未找到单据数据");
+    }
+
+    state.documentPlatformOrderNo = platformOrderNo;
+    acceptDocumentResponse(proxyPayload.response, unwrapped);
+    setRequestState(unwrapped.error ? "error" : "success", unwrapped.error ? "接口异常" : "查询完成");
+    setInlineStatus(els.documentQueryStatus, `HTTP ${proxyPayload.targetStatus} · ${totalDocumentRecordCount()} 条记录`, "success");
+    els.downloadJsonButton.disabled = false;
+    switchTab("doc-overview");
+    showToast(unwrapped.error || "单据结果已更新");
+  } catch (error) {
+    setRequestState("error", "查询失败");
+    setInlineStatus(els.documentQueryStatus, error.message, "error");
+    showToast(`查询失败：${error.message}`);
+  } finally {
+    els.documentQueryButton.disabled = false;
+  }
+}
+
 function renderJsonInput() {
   const text = els.jsonInput.value.trim();
   if (!text) {
@@ -363,10 +595,203 @@ function unwrapValidateResponse(response) {
   return { data: null, error: response.errorMessage || response.message || "接口返回结构不匹配" };
 }
 
+function acceptDocumentResponse(response, existingUnwrapped = null) {
+  const unwrapped = existingUnwrapped || unwrapDocumentResponse(response);
+  if (!unwrapped.data) {
+    throw new Error(unwrapped.error || "接口返回中未找到单据数据");
+  }
+  state.documentResult = unwrapped.data;
+  state.documentRawResponse = response;
+  state.documentFilters.clear();
+  renderDocumentAll();
+  return unwrapped;
+}
+
+function unwrapDocumentResponse(response) {
+  if (!response) {
+    return { data: null, error: "接口返回为空" };
+  }
+  if (isDocumentResult(response)) {
+    return { data: response, error: "" };
+  }
+  if (response.data && isDocumentResult(response.data)) {
+    const error = response.result && response.result !== 200
+      ? response.errorMessage || response.errorCode || "业务接口返回非 200"
+      : "";
+    return { data: response.data, error };
+  }
+  if (response.rawText) {
+    return { data: null, error: response.rawText.slice(0, 500) };
+  }
+  return { data: null, error: response.errorMessage || response.message || "接口返回结构不匹配" };
+}
+
+function isDocumentResult(value) {
+  if (!value || typeof value !== "object") return false;
+  return DOCUMENT_GROUPS.some((group) => Object.prototype.hasOwnProperty.call(value, group.key));
+}
+
 function renderAllResults() {
   clearDynamicTabs();
   renderOverview();
   renderSheetTabsAndPages();
+  renderModuleTabs();
+}
+
+function renderDocumentAll() {
+  renderDocumentOverview();
+  renderDocumentPages();
+  renderModuleTabs();
+}
+
+function renderDocumentOverview() {
+  if (!state.documentResult) {
+    els.documentOverviewEmpty.classList.remove("hidden");
+    els.documentOverviewContent.classList.add("hidden");
+    els.documentOverviewSubtitle.textContent = "输入平台订单号查询后，这里会展示各单据记录数。";
+    return;
+  }
+
+  els.documentOverviewEmpty.classList.add("hidden");
+  els.documentOverviewContent.classList.remove("hidden");
+  els.documentOverviewSubtitle.textContent = `平台订单号 ${state.documentPlatformOrderNo || "-"} · ${totalDocumentRecordCount()} 条记录`;
+
+  const groupCounts = DOCUMENT_GROUPS.map((group) => ({
+    group,
+    collections: resolveDocumentCollections(group),
+  }));
+  const nonEmptyCount = groupCounts.filter((item) => collectionTotal(item.collections) > 0).length;
+  els.documentSummaryMetrics.innerHTML = [
+    metricCard("平台订单号", state.documentPlatformOrderNo || "-", "本次查询条件", "compact-value"),
+    metricCard("总记录数", totalDocumentRecordCount(), `${nonEmptyCount} 个单据页有数据`),
+    metricCard("明细分组", groupCounts.reduce((sum, item) => sum + item.collections.length, 0), "按响应对象列表拆分"),
+    metricCard("空单据页", DOCUMENT_GROUPS.length - nonEmptyCount, "当前未返回记录"),
+  ].join("");
+
+  const tbody = els.documentSummaryTable.querySelector("tbody");
+  tbody.innerHTML = groupCounts.map(({ group, collections }) => {
+    const count = collectionTotal(collections);
+    const details = collections.map((collection) => `${collection.title} ${collection.records.length}`).join(" / ") || "无明细分组";
+    return `
+      <tr>
+        <td>${escapeHtml(group.title)}</td>
+        <td class="number-cell">${numberText(count)}</td>
+        <td>${escapeHtml(details)}</td>
+        <td>
+          <button class="small-button" type="button" data-switch-tab="${escapeAttr(group.tabId)}" ${count ? "" : "disabled"}>查看</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderDocumentPages() {
+  els.documentPages.innerHTML = DOCUMENT_GROUPS.map((group) => renderDocumentPage(group)).join("");
+}
+
+function renderDocumentPage(group) {
+  const collections = resolveDocumentCollections(group);
+  const filter = ensureDocumentFilter(group.tabId);
+  const total = collectionTotal(collections);
+  const visibleTotal = collections.reduce((sum, collection) => {
+    return sum + filterDocumentRecords(collection.records, filter).length;
+  }, 0);
+  return `
+    <section class="page ${state.activeTab === group.tabId ? "active" : ""}" id="page-${escapeAttr(group.tabId)}" data-page="${escapeAttr(group.tabId)}">
+      <div class="sheet-head">
+        <div>
+          <h1>${escapeHtml(group.title)}</h1>
+          <div class="sheet-meta">
+            ${renderPill(`总记录 ${numberText(total)}`)}
+            ${renderPill(`当前展示 ${numberText(visibleTotal)}`)}
+            ${renderPill(`平台订单号 ${displayValue(state.documentPlatformOrderNo) || "-"}`)}
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="secondary-button" type="button" data-switch-tab="doc-overview">返回概况</button>
+        </div>
+      </div>
+
+      <div class="sheet-toolbar">
+        <div class="sheet-toolbar-main">
+          <span class="target-chip">${escapeHtml(collections.length ? `${collections.length} 个明细分组` : "无明细分组")}</span>
+        </div>
+        <div class="sheet-toolbar-extra">
+          <input type="search" placeholder="搜索字段和值" value="${escapeAttr(filter.query)}" data-document-search data-tab-id="${escapeAttr(group.tabId)}" />
+        </div>
+      </div>
+
+      ${state.documentResult ? renderDocumentCollections(collections, filter) : renderDocumentEmpty("暂无单据结果，请先按平台订单号查询。")}
+    </section>
+  `;
+}
+
+function renderDocumentCollections(collections, filter) {
+  if (!collectionTotal(collections)) {
+    return renderDocumentEmpty("当前平台订单号没有返回该单据数据。");
+  }
+  return collections.map((collection) => renderDocumentCollection(collection, filter)).join("");
+}
+
+function renderDocumentCollection(collection, filter) {
+  const records = filterDocumentRecords(collection.records, filter);
+  const fields = collectDocumentFields(collection.records);
+  return `
+    <section class="document-section">
+      <div class="document-section-head">
+        <div>
+          <h2>${escapeHtml(collection.title)}</h2>
+          <p class="muted">${numberText(records.length)} / ${numberText(collection.records.length)} 条记录</p>
+        </div>
+      </div>
+      ${records.length ? `
+        <div class="table-wrap">
+          <table class="data-table document-table">
+            <thead>
+              <tr>
+                ${fields.map((field) => renderDocumentHeader(field)).join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${records.map((record) => `
+                <tr>
+                  ${fields.map((field) => `<td>${renderDocumentValue(record[field])}</td>`).join("")}
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : renderDocumentEmpty("没有符合搜索条件的记录。")}
+    </section>
+  `;
+}
+
+function renderDocumentHeader(field) {
+  const label = fieldLabel(field);
+  return `
+    <th title="${escapeAttr(label)}">
+      <span class="document-field-label">${escapeHtml(compactLabel(label))}</span>
+      <small>${escapeHtml(field)}</small>
+    </th>
+  `;
+}
+
+function renderDocumentValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return `<span class="muted">-</span>`;
+  }
+  if (typeof value === "object") {
+    return `<code class="json-cell">${escapeHtml(JSON.stringify(value))}</code>`;
+  }
+  return escapeHtml(String(value));
+}
+
+function renderDocumentEmpty(text) {
+  return `
+    <div class="empty-state compact-empty">
+      <div class="empty-text">${escapeHtml(text)}</div>
+    </div>
+  `;
 }
 
 function clearDynamicTabs() {
@@ -469,6 +894,7 @@ function renderSheetTabsAndPages() {
     tab.className = `tab${hasSheetIssue(sheet) ? " has-error" : ""}`;
     tab.type = "button";
     tab.dataset.tab = tabId;
+    tab.dataset.module = "validate";
     tab.dataset.dynamicTab = "true";
     tab.title = sheetName;
     tab.textContent = sheetName;
@@ -733,9 +1159,9 @@ function renderHeaderSection(sheet) {
   `;
 }
 
-function metricCard(label, value, sub) {
+function metricCard(label, value, sub, className = "") {
   return `
-    <div class="metric-card">
+    <div class="metric-card ${escapeAttr(className)}">
       <div class="metric-label">${escapeHtml(label)}</div>
       <div class="metric-value">${numberText(value)}</div>
       <div class="metric-sub">${escapeHtml(sub || "")}</div>
@@ -757,6 +1183,111 @@ function renderPills(items, tone = "") {
 
 function renderPill(text, tone = "") {
   return `<span class="pill ${escapeAttr(tone)}">${escapeHtml(text)}</span>`;
+}
+
+function resolveDocumentCollections(group) {
+  if (!state.documentResult) {
+    return group.collections.map((collection) => ({ ...collection, records: [] }));
+  }
+  return group.collections.map((collection) => ({
+    ...collection,
+    records: normalizeRecords(valueAtPath(state.documentResult, collection.path)),
+  }));
+}
+
+function valueAtPath(source, path) {
+  return path.reduce((current, key) => {
+    if (!current || typeof current !== "object") return undefined;
+    return current[key];
+  }, source);
+}
+
+function normalizeRecords(value) {
+  if (Array.isArray(value)) return value.filter((item) => item && typeof item === "object");
+  if (value && typeof value === "object") return [value];
+  return [];
+}
+
+function collectionTotal(collections) {
+  return collections.reduce((sum, collection) => sum + collection.records.length, 0);
+}
+
+function totalDocumentRecordCount() {
+  return DOCUMENT_GROUPS.reduce((sum, group) => sum + collectionTotal(resolveDocumentCollections(group)), 0);
+}
+
+function collectDocumentFields(records) {
+  const fields = [];
+  const seen = new Set();
+  records.forEach((record) => {
+    Object.keys(record || {}).forEach((field) => {
+      if (!seen.has(field)) {
+        seen.add(field);
+        fields.push(field);
+      }
+    });
+  });
+  return fields;
+}
+
+function filterDocumentRecords(records, filter) {
+  const query = (filter.query || "").toLowerCase();
+  if (!query) return records;
+  return records.filter((record) => documentRecordSearchText(record).includes(query));
+}
+
+function documentRecordSearchText(record) {
+  const parts = [JSON.stringify(record)];
+  Object.keys(record || {}).forEach((field) => {
+    parts.push(field, fieldLabel(field), fieldAliases(field));
+  });
+  return parts.join(" ").toLowerCase();
+}
+
+function fieldAliases(field) {
+  const aliases = {
+    platformOrderNo: "tid orderNo 平台订单号 原始线上单号",
+    orderNo: "tid platformOrderNo 平台订单号",
+    tid: "platformOrderNo orderNo 平台订单号 原始线上单号",
+    asPlatNo: "tid platformOrderNo orderNo 平台订单号 线上单号 原始线上单号",
+    oid: "子订单号 平台子订单号",
+    sid: "系统订单号",
+  };
+  return aliases[field] || "";
+}
+
+function restoreDocumentSearchFocus(tabId) {
+  const input = document.querySelector(`[data-document-search][data-tab-id="${cssAttr(tabId)}"]`);
+  if (!input) return;
+  input.focus();
+  const end = input.value.length;
+  input.setSelectionRange(end, end);
+}
+
+function ensureDocumentFilter(tabId) {
+  if (!state.documentFilters.has(tabId)) {
+    state.documentFilters.set(tabId, { query: "" });
+  }
+  return state.documentFilters.get(tabId);
+}
+
+function fieldLabel(field) {
+  return state.documentLabels[field] || FALLBACK_FIELD_LABELS[field] || field;
+}
+
+function compactLabel(label) {
+  if (!label) return "";
+  const cleaned = String(label)
+    .replace(/\{@link\s+[^}]+}/g, "")
+    .replace(/对应\s+[A-Za-z0-9_]+DO/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= 22) return cleaned;
+  const punctuationIndex = cleaned.search(/[，,。；;：:]/);
+  if (punctuationIndex > 3 && punctuationIndex <= 22) {
+    return cleaned.slice(0, punctuationIndex);
+  }
+  return `${cleaned.slice(0, 22)}...`;
 }
 
 function ensureSheetFilter(tabId) {
@@ -882,10 +1413,49 @@ function rowKey(tabId, rowIndex) {
   return `${tabId}:${rowIndex}`;
 }
 
+function switchModule(module) {
+  if (!["validate", "documents"].includes(module)) return;
+  state.activeModule = module;
+  document.body.dataset.module = module;
+
+  document.querySelectorAll("[data-module-switch]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.moduleSwitch === module);
+  });
+  document.querySelectorAll("[data-module-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.modulePanel !== module);
+  });
+
+  els.configTitle.textContent = module === "documents" ? "系统配置" : "系统配置";
+  els.configSubtitle.textContent = module === "documents"
+    ? "选择环境、保存 Cookie、输入平台订单号查询单据。"
+    : "选择环境、保存 Cookie、上传预期结果 Excel。";
+
+  document.querySelector(".brand-mark").textContent = module === "documents" ? "单" : "验";
+  document.querySelector(".brand-title").textContent = module === "documents" ? "导入运行结果单据查看" : "导入运行结果校验";
+  updateEnvSummary();
+  renderModuleTabs();
+
+  const nextTab = tabAvailableForModule(state.lastTabs[module], module) ? state.lastTabs[module] : "config";
+  switchTab(nextTab);
+  syncDownloadButton();
+}
+
+function renderModuleTabs() {
+  document.querySelectorAll("#tabs [data-module]").forEach((tab) => {
+    tab.classList.toggle("hidden", tab.dataset.module !== state.activeModule);
+  });
+}
+
+function tabAvailableForModule(tabId, module) {
+  return Boolean([...document.querySelectorAll(`#tabs [data-tab="${cssAttr(tabId)}"]`)]
+    .find((tab) => tab.dataset.module === module));
+}
+
 function switchTab(tabId) {
   state.activeTab = tabId;
+  state.lastTabs[state.activeModule] = tabId;
   document.querySelectorAll("[data-tab]").forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.tab === tabId);
+    tab.classList.toggle("active", tab.dataset.tab === tabId && (!tab.dataset.module || tab.dataset.module === state.activeModule));
   });
   document.querySelectorAll("[data-page]").forEach((page) => {
     page.classList.toggle("active", page.dataset.page === tabId);
@@ -907,14 +1477,20 @@ function setInlineStatus(element, text, type = "") {
   element.style.color = type === "error" ? "var(--red)" : type === "success" ? "var(--green)" : "";
 }
 
+function syncDownloadButton() {
+  const raw = state.activeModule === "documents" ? state.documentRawResponse : state.rawResponse;
+  els.downloadJsonButton.disabled = !raw;
+}
+
 function downloadRawJson() {
-  if (!state.rawResponse) return;
-  const blob = new Blob([JSON.stringify(state.rawResponse, null, 2)], { type: "application/json;charset=utf-8" });
+  const raw = state.activeModule === "documents" ? state.documentRawResponse : state.rawResponse;
+  if (!raw) return;
+  const blob = new Blob([JSON.stringify(raw, null, 2)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   link.href = url;
-  link.download = `validate-result-${stamp}.json`;
+  link.download = `${state.activeModule === "documents" ? "document-result" : "validate-result"}-${stamp}.json`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -932,6 +1508,10 @@ function showToast(message) {
 
 function numberText(value) {
   if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (/^-?\d{12,}$/.test(text)) return text;
+  }
   const number = Number(value);
   if (Number.isFinite(number) && String(value).trim() !== "") {
     return number.toLocaleString("zh-CN");

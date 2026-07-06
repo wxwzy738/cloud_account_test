@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -21,8 +21,10 @@ ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
 CONFIG_FILE = ROOT / "config.json"
 VALIDATE_PATH = "/cloudaccount/importTestData/validateExcel"
+DOCUMENT_QUERY_PATH = "/cloudaccount/importTestData/platformOrderNo"
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 300
+KMERP_ROOT = Path("/Users/huangjie/workspace/workspace_git/kmerp-account-system")
 
 ENVIRONMENTS = {
     "local": {
@@ -39,6 +41,29 @@ DEFAULT_CONFIG = {
     "environment": "local",
     "cookie": "",
 }
+
+SCHEMA_SOURCE_FILES = [
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/imports/dto/ImportAfterQueryResult.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/imports/dto/ImportAfterQueryOriginalOrderResult.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/imports/dto/ImportAfterQueryOriginalAfterSaleResult.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/imports/dto/ImportAfterQueryOrderStreamResult.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/orderstream/YzOrderStreamExtDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/orderstream/YzOrderStreamDetailDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/erpsync/ErpItemSnapshotDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/erpsync/ErpTradeDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/erpsync/ErpOrderDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/erpsync/ErpWorkOrderDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/erpsync/ErpReissueOrRefundDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/aftersales/YzRefundOnlyTrackingDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/aftersales/YzAfterSalesExceptionDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/standardfund/YzStandardFundBillFlowInfoDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/adjustment/YzArAdjustmentRecordDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/verification/YzManualVerifyRecordDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/reconciliation/YzArReconciliationDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/issuedbalance/YzIssuedBalanceProcessDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/issuedbalance/YzIssuedBalanceDetailDO.java",
+    KMERP_ROOT / "kmerp-account-core/src/main/java/com/raycloud/dmj/account/core/common/BaseInfo.java",
+]
 
 
 def load_config() -> dict[str, Any]:
@@ -156,6 +181,102 @@ def decode_target_response(raw: bytes) -> Any:
         return {"rawText": text}
 
 
+def clean_java_doc(lines: list[str]) -> str:
+    text = " ".join(
+        line.strip().lstrip("*").strip()
+        for line in lines
+        if line.strip() and line.strip() not in ("/**", "*/")
+    )
+    return " ".join(text.split())
+
+
+def schema_description(annotation_line: str) -> str:
+    for key in ("description", "value"):
+        marker = f'{key} = "'
+        start = annotation_line.find(marker)
+        if start >= 0:
+            start += len(marker)
+            end = annotation_line.find('"', start)
+            if end >= 0:
+                return annotation_line[start:end].strip()
+
+    start = annotation_line.find('("')
+    if start >= 0:
+        start += 2
+        end = annotation_line.find('"', start)
+        if end >= 0:
+            return annotation_line[start:end].strip()
+    return ""
+
+
+def extract_field_labels() -> dict[str, str]:
+    labels = {
+        "created": "创建时间",
+        "modified": "更新时间",
+        "companyId": "公司ID",
+        "createdAt": "创建时间",
+        "updatedAt": "更新时间",
+        "isDeleted": "逻辑删除",
+        "deletedVersion": "逻辑删除版本号",
+    }
+
+    for file_path in SCHEMA_SOURCE_FILES:
+        if not file_path.exists():
+            continue
+        try:
+            lines = file_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+
+        comment_lines: list[str] = []
+        pending_comment = ""
+        pending_schema = ""
+        in_comment = False
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("/**"):
+                in_comment = True
+                comment_lines = [stripped]
+                if stripped.endswith("*/"):
+                    in_comment = False
+                    pending_comment = clean_java_doc(comment_lines)
+                continue
+            if in_comment:
+                comment_lines.append(stripped)
+                if stripped.endswith("*/"):
+                    in_comment = False
+                    pending_comment = clean_java_doc(comment_lines)
+                continue
+
+            if stripped.startswith("@Schema(") or stripped.startswith("@ApiModelProperty("):
+                pending_schema = schema_description(stripped)
+                continue
+
+            if ";" not in stripped:
+                continue
+
+            declaration = stripped.split("=", 1)[0].rstrip(";").strip()
+            tokens = declaration.split()
+            if not tokens:
+                continue
+            if not any(token in {"private", "protected", "public"} for token in tokens):
+                continue
+            field_name = tokens[-1]
+            if field_name == "serialVersionUID":
+                pending_comment = ""
+                pending_schema = ""
+                continue
+
+            label = pending_schema or pending_comment
+            if label:
+                labels[field_name] = label
+            pending_comment = ""
+            pending_schema = ""
+
+    return labels
+
+
 class ValidateViewerHandler(BaseHTTPRequestHandler):
     server_version = "CloudAccountValidateViewer/1.0"
 
@@ -170,8 +291,12 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
                     "config": load_config(),
                     "environments": ENVIRONMENTS,
                     "validatePath": VALIDATE_PATH,
+                    "documentQueryPath": DOCUMENT_QUERY_PATH,
                 }
             )
+            return
+        if path == "/api/document-labels":
+            self.send_json({"labels": extract_field_labels()})
             return
         if path == "/api/health":
             self.send_json({"ok": True})
@@ -185,6 +310,9 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/validate":
             self.proxy_validate_request()
+            return
+        if path == "/api/document-query":
+            self.proxy_document_query_request()
             return
         self.send_json({"ok": False, "message": "接口不存在"}, HTTPStatus.NOT_FOUND)
 
@@ -304,6 +432,73 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             headers["Cookie"] = config["cookie"]
 
         request = Request(target_url, data=target_body, headers=headers, method="POST")
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                status = response.status
+                raw = response.read()
+                target_headers = dict(response.headers.items())
+        except HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            target_headers = dict(exc.headers.items()) if exc.headers else {}
+        except URLError as exc:
+            self.send_json(
+                {
+                    "ok": False,
+                    "message": f"无法访问目标环境：{exc.reason}",
+                    "targetUrl": target_url,
+                },
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        target_payload = decode_target_response(raw)
+        self.send_json(
+            {
+                "ok": 200 <= status < 400,
+                "targetStatus": status,
+                "targetUrl": target_url,
+                "contentType": target_headers.get("Content-Type"),
+                "response": target_payload,
+            },
+            HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def proxy_document_query_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        platform_order_no = str(payload.get("platformOrderNo") or "").strip()
+        if not platform_order_no:
+            self.send_json({"ok": False, "message": "请输入平台订单号"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in ENVIRONMENTS:
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        cookie = payload.get("cookie")
+        if cookie is None:
+            cookie = config.get("cookie", "")
+        config = save_config({"environment": environment, "cookie": cookie})
+
+        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        query_string = urlencode({"platformOrderNo": platform_order_no})
+        target_url = urljoin(base_url, DOCUMENT_QUERY_PATH.lstrip("/")) + "?" + query_string
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": self.server_version,
+            "Referer": base_url,
+        }
+        if config.get("cookie"):
+            headers["Cookie"] = config["cookie"]
+
+        request = Request(target_url, headers=headers, method="GET")
         try:
             with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 status = response.status
