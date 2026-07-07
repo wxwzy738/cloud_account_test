@@ -6,6 +6,7 @@ import json
 import mimetypes
 import secrets
 import sys
+from functools import lru_cache
 from email.parser import BytesParser
 from email.policy import default
 from http import HTTPStatus
@@ -22,8 +23,10 @@ STATIC_DIR = ROOT / "static"
 CONFIG_FILE = ROOT / "config.json"
 VALIDATE_PATH = "/cloudaccount/importTestData/validateExcel"
 DOCUMENT_QUERY_PATH = "/cloudaccount/importTestData/platformOrderNo"
+OPENAPI_SCHEMA_URL = "https://pubcloud3.superboss.cc/v3/api-docs/cloud-account"
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 300
+SCHEMA_REQUEST_TIMEOUT_SECONDS = 30
 KMERP_ROOT = Path("/Users/huangjie/workspace/workspace_git/kmerp-account-system")
 
 ENVIRONMENTS = {
@@ -85,6 +88,64 @@ SCHEMA_SOURCE_ROOTS = [
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/imports/dto",
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain",
 ]
+
+MANUAL_SCHEMA_LABELS = {
+    "addressMd5": "收货地址MD5",
+    "addressType": "地址类型",
+    "asNoSkuCodeKey": "售后单号+商品编码匹配键",
+    "buyerNick": "买家昵称",
+    "discountRate": "折扣率",
+    "isExcep": "是否异常订单",
+    "isRefund": "是否退款",
+    "mobileTail": "手机号后四位",
+    "outerIid": "外部商品ID",
+    "outerSkuId": "外部SKU ID",
+    "postFee": "邮费",
+    "receiverAddress": "收货详细地址",
+    "receiverCity": "收货城市",
+    "receiverCountry": "收货国家",
+    "receiverDistrict": "收货区县",
+    "receiverMobile": "收货手机号",
+    "receiverName": "收货人姓名",
+    "receiverPhone": "收货电话",
+    "receiverState": "收货省份",
+    "receiverStreet": "收货街道",
+    "receiverZip": "收货邮编",
+    "refundRemindTimeout": "退款提醒超时时间",
+    "taobaoId": "店铺平台ID",
+    "taxFee": "税费",
+    "theoryPostFee": "理论邮费",
+    "vtime": "金额核销时间",
+    "vno": "金额核销单号",
+    "vstatus": "金额核销状态",
+    "vinvQty": "核销用库存数量",
+    "varAmt": "核销用应收账款",
+    "agingDays": "账龄",
+    "afterSalesAgingDays": "售后账龄",
+}
+
+MANUAL_SCHEMA_MODEL_LABELS = {
+    "ErpWorkOrderDO": {
+        "taobaoId": "店铺平台ID",
+    },
+    "YzOrderStreamDetailDO": {
+        "vtime": "到账时间",
+        "vno": "金额核销单号",
+        "vstatus": "金额核销状态",
+    },
+    "YzOrderStreamExtDO": {
+        "vinvQty": "核销用库存数量",
+        "varAmt": "核销用应收账款",
+    },
+    "YzIssuedBalanceProcessDO": {
+        "agingDays": "账龄（按发货时间动态计算）",
+        "afterSalesAgingDays": "售后账龄（按售后创建时间动态计算）",
+    },
+    "YzIssuedBalanceDetailDO": {
+        "vtime": "金额核销时间",
+        "vno": "金额核销单号",
+    },
+}
 
 
 def load_config() -> dict[str, Any]:
@@ -233,6 +294,157 @@ def schema_description(annotation_line: str) -> str:
     return ""
 
 
+def clean_schema_label(value: Any) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).split()).strip()
+
+
+def normalized_label_key(value: str) -> str:
+    return "".join(char.lower() for char in value if char.isalnum())
+
+
+def is_helpful_schema_label(field_name: str, label: str) -> bool:
+    if not label:
+        return False
+    return normalized_label_key(field_name) != normalized_label_key(label)
+
+
+def manual_schema_labels_payload() -> dict[str, Any]:
+    return {
+        "labels": dict(MANUAL_SCHEMA_LABELS),
+        "models": {model: dict(labels) for model, labels in MANUAL_SCHEMA_MODEL_LABELS.items()},
+        "sourceCount": len(MANUAL_SCHEMA_LABELS) + len(MANUAL_SCHEMA_MODEL_LABELS),
+        "source": "manual",
+    }
+
+
+@lru_cache(maxsize=1)
+def load_openapi_document() -> dict[str, Any]:
+    request = Request(
+        OPENAPI_SCHEMA_URL,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "CloudAccountValidateViewer/1.0",
+        },
+        method="GET",
+    )
+    with urlopen(request, timeout=SCHEMA_REQUEST_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def schema_ref_name(schema: Any) -> str:
+    if not isinstance(schema, dict):
+        return ""
+    ref = schema.get("$ref")
+    if not isinstance(ref, str):
+        return ""
+    marker = "#/components/schemas/"
+    return ref.removeprefix(marker) if ref.startswith(marker) else ""
+
+
+def collect_openapi_schema_refs(schema: Any, schemas: dict[str, Any], seen: set[str]) -> None:
+    if not isinstance(schema, dict):
+        return
+
+    ref_name = schema_ref_name(schema)
+    if ref_name and ref_name not in seen:
+        seen.add(ref_name)
+        collect_openapi_schema_refs(schemas.get(ref_name), schemas, seen)
+
+    for key in ("allOf", "anyOf", "oneOf"):
+        for child in schema.get(key) or []:
+            collect_openapi_schema_refs(child, schemas, seen)
+
+    collect_openapi_schema_refs(schema.get("items"), schemas, seen)
+    collect_openapi_schema_refs(schema.get("additionalProperties"), schemas, seen)
+    for prop_schema in (schema.get("properties") or {}).values():
+        collect_openapi_schema_refs(prop_schema, schemas, seen)
+
+
+def iter_document_response_schemas(openapi: dict[str, Any]) -> list[dict[str, Any]]:
+    path_item = (openapi.get("paths") or {}).get(DOCUMENT_QUERY_PATH) or {}
+    response_schemas: list[dict[str, Any]] = []
+    for operation in path_item.values():
+        if not isinstance(operation, dict):
+            continue
+        responses = operation.get("responses") or {}
+        response = responses.get("200") or responses.get("default") or {}
+        for content in (response.get("content") or {}).values():
+            schema = content.get("schema")
+            if isinstance(schema, dict):
+                response_schemas.append(schema)
+    return response_schemas
+
+
+def extract_openapi_schema_labels() -> dict[str, Any]:
+    try:
+        openapi = load_openapi_document()
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError, URLError):
+        return {"labels": {}, "models": {}, "sourceCount": 0, "source": "openapi"}
+
+    schemas = (openapi.get("components") or {}).get("schemas") or {}
+    if not isinstance(schemas, dict):
+        return {"labels": {}, "models": {}, "sourceCount": 0, "source": "openapi"}
+
+    schema_names: set[str] = set()
+    for response_schema in iter_document_response_schemas(openapi):
+        collect_openapi_schema_refs(response_schema, schemas, schema_names)
+
+    labels: dict[str, str] = {}
+    models: dict[str, dict[str, str]] = {}
+    for schema_name in sorted(schema_names):
+        schema = schemas.get(schema_name) or {}
+        properties = schema.get("properties") or {}
+        if not isinstance(properties, dict):
+            continue
+
+        model_labels = models.setdefault(schema_name, {})
+        for field_name, prop_schema in properties.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            label = clean_schema_label(prop_schema.get("description"))
+            if not is_helpful_schema_label(field_name, label):
+                continue
+            model_labels[field_name] = label
+            labels.setdefault(field_name, label)
+
+    return {
+        "labels": labels,
+        "models": models,
+        "sourceCount": len(schema_names),
+        "source": "openapi",
+    }
+
+
+def merge_schema_label_payloads(*payloads: dict[str, Any]) -> dict[str, Any]:
+    labels: dict[str, str] = {}
+    models: dict[str, dict[str, str]] = {}
+    source_count = 0
+    sources: list[str] = []
+
+    for payload in payloads:
+        if not payload:
+            continue
+        source_count += int(payload.get("sourceCount") or 0)
+        source = payload.get("source")
+        if source:
+            sources.append(str(source))
+
+        labels.update(payload.get("labels") or {})
+        for model_name, model_labels in (payload.get("models") or {}).items():
+            if not isinstance(model_labels, dict):
+                continue
+            models.setdefault(model_name, {}).update(model_labels)
+
+    return {
+        "labels": labels,
+        "models": models,
+        "sourceCount": source_count,
+        "sources": sources,
+    }
+
+
 def collect_schema_source_files() -> list[Path]:
     files: list[Path] = []
     seen: set[Path] = set()
@@ -261,7 +473,7 @@ def class_name_from_source(lines: list[str], fallback: str) -> str:
     return fallback
 
 
-def extract_schema_labels() -> dict[str, Any]:
+def extract_local_schema_labels() -> dict[str, Any]:
     labels = {
         "created": "创建时间",
         "modified": "更新时间",
@@ -326,7 +538,7 @@ def extract_schema_labels() -> dict[str, Any]:
                 continue
 
             label = pending_schema or pending_comment
-            if label:
+            if is_helpful_schema_label(field_name, label):
                 model_labels[field_name] = label
                 if field_name not in labels or file_path in explicit_source_files:
                     labels[field_name] = label
@@ -337,7 +549,15 @@ def extract_schema_labels() -> dict[str, Any]:
         "labels": labels,
         "models": models,
         "sourceCount": len(schema_source_files),
+        "source": "local",
     }
+
+
+def extract_schema_labels() -> dict[str, Any]:
+    local_labels = extract_local_schema_labels()
+    openapi_labels = extract_openapi_schema_labels()
+    manual_labels = manual_schema_labels_payload()
+    return merge_schema_label_payloads(local_labels, openapi_labels, manual_labels)
 
 
 class ValidateViewerHandler(BaseHTTPRequestHandler):
