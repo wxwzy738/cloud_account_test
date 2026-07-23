@@ -34,3 +34,9 @@ OSError: [Errno 48] Address already in use
 [23/Jul/2026 10:13:21] "POST /api/test-cases HTTP/1.1" 200 -
 [23/Jul/2026 10:13:43] "POST /api/test-cases HTTP/1.1" 200 -
 [23/Jul/2026 10:15:12] "POST /api/document-query HTTP/1.1" 200 -
+[23/Jul/2026 10:20:04] "GET / HTTP/1.1" 200 -
+[23/Jul/2026 10:20:04] "GET /static/styles.css HTTP/1.1" 200 -
+[23/Jul/2026 10:20:04] "GET /static/app.js HTTP/1.1" 200 -
+[23/Jul/2026 10:20:04] "GET /api/config HTTP/1.1" 200 -
+[23/Jul/2026 10:20:04] "GET /api/document-labels HTTP/1.1" 200 -
+[23/Jul/2026 10:20:15] "POST /api/test-cases HTTP/1.1" 200 -

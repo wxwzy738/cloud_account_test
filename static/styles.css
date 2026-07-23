@@ -126,6 +126,10 @@ button:disabled {
   scrollbar-width: thin;
 }
 
+body[data-module="test-cases"] .tabs {
+  display: none;
+}
+
 .tab {
   position: relative;
   flex: 0 0 auto;
