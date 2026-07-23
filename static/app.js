@@ -2,15 +2,26 @@ const state = {
   config: { environment: "local" },
   environments: {},
   companies: [
-    { name: "咖啡测试3", companyId: "10438" },
     { name: "德赛集团", companyId: "37041" },
+    { name: "咖啡测试3", companyId: "10438" },
   ],
-  defaultCompanyByModule: { validate: "10438", documents: "37041" },
-  companyByModule: { validate: "10438", documents: "37041" },
+  defaultCompanyByModule: { validate: "10438", documents: "37041", "company-config": "37041", "test-cases": "37041" },
+  companyByModule: { validate: "10438", documents: "37041", "company-config": "37041", "test-cases": "37041" },
   activeModule: "validate",
-  lastTabs: { validate: "config", documents: "config" },
+  lastTabs: { validate: "config", documents: "config", "test-cases": "test-cases" },
   validatePath: "/cloudaccount/importTestData/validateExcel",
   documentQueryPath: "/cloudaccount/importTestData/platformOrderNo",
+  testCasePageListPath: "/cloudaccount/testCase/pageList",
+  testCasePageInfoPath: "/cloudaccount/testCase/pageInfo",
+  testCases: [],
+  testCasePageInfo: { total: 0, pageNo: 1, pageSize: 20 },
+  testCaseQuery: { pageNo: 1, pageSize: 20, platformOrderNo: "", status: "" },
+  testCasesLoaded: false,
+  testCaseRawResponse: null,
+  editingTestCaseTitleId: null,
+  companyConfigBaseUrl: "https://pubcloud3.superboss.cc/",
+  companyConfig: {},
+  companyConfigLoading: false,
   result: null,
   rawResponse: null,
   documentResult: null,
@@ -34,10 +45,17 @@ const els = {
   sheetPages: document.getElementById("sheetPages"),
   documentPages: document.getElementById("documentPages"),
   configForm: document.getElementById("configForm"),
+  companyConfigForm: document.getElementById("companyConfigForm"),
   uploadForm: document.getElementById("uploadForm"),
   documentQueryForm: document.getElementById("documentQueryForm"),
   jsonImportForm: document.getElementById("jsonImportForm"),
   companySelect: document.getElementById("companySelect"),
+  companyConfigCompanySelect: document.getElementById("companyConfigCompanySelect"),
+  companyConfigCompanyHint: document.getElementById("companyConfigCompanyHint"),
+  companyConfigFields: document.getElementById("companyConfigFields"),
+  companyConfigLoading: document.getElementById("companyConfigLoading"),
+  saveCompanyConfigButton: document.getElementById("saveCompanyConfigButton"),
+  saveCompanyConfigStatus: document.getElementById("saveCompanyConfigStatus"),
   companyHint: document.getElementById("companyHint"),
   platformOrderInput: document.getElementById("platformOrderInput"),
   jsonInput: document.getElementById("jsonInput"),
@@ -56,6 +74,26 @@ const els = {
   dropZone: document.getElementById("dropZone"),
   validateButton: document.getElementById("validateButton"),
   documentQueryButton: document.getElementById("documentQueryButton"),
+  testCaseQueryForm: document.getElementById("testCaseQueryForm"),
+  testCaseCompanySelect: document.getElementById("testCaseCompanySelect"),
+  testCasePlatformOrderInput: document.getElementById("testCasePlatformOrderInput"),
+  testCaseStatusSelect: document.getElementById("testCaseStatusSelect"),
+  testCaseQueryButton: document.getElementById("testCaseQueryButton"),
+  testCaseQueryStatus: document.getElementById("testCaseQueryStatus"),
+  openRecordTestCaseButton: document.getElementById("openRecordTestCaseButton"),
+  recordTestCaseDialog: document.getElementById("recordTestCaseDialog"),
+  recordTestCaseForm: document.getElementById("recordTestCaseForm"),
+  closeRecordTestCaseButton: document.getElementById("closeRecordTestCaseButton"),
+  recordTestCaseCompanySelect: document.getElementById("recordTestCaseCompanySelect"),
+  recordTestCasePlatformOrderInput: document.getElementById("recordTestCasePlatformOrderInput"),
+  recordTestCaseButton: document.getElementById("recordTestCaseButton"),
+  recordTestCaseStatus: document.getElementById("recordTestCaseStatus"),
+  testCaseTableBody: document.getElementById("testCaseTableBody"),
+  testCaseEmpty: document.getElementById("testCaseEmpty"),
+  testCasePagination: document.getElementById("testCasePagination"),
+  testCaseDetail: document.getElementById("testCaseDetail"),
+  testCaseDetailSummary: document.getElementById("testCaseDetailSummary"),
+  testCaseDetailContent: document.getElementById("testCaseDetailContent"),
   requestState: document.getElementById("requestState"),
   overviewEmpty: document.getElementById("overviewEmpty"),
   overviewContent: document.getElementById("overviewContent"),
@@ -183,6 +221,27 @@ const FALLBACK_FIELD_LABELS = {
   remark: "备注",
 };
 
+const COMPANY_CONFIG_FIELDS = [
+  { key: "reissueRecordReceivable", label: "补发商品是否计入应收", description: "补发商品是否计入应收：0=不计入，1=计入", type: "binary", off: "不计入", on: "计入" },
+  { key: "exchangeOrderRefundParticipateReconcile", label: "换货订单/换货退货是否参与对账", description: "换货订单/换货退货是否参与对账：0=不参与，1=参与", type: "binary", off: "不参与", on: "参与" },
+  { key: "exchangeOrderRefundRecordReceivable", label: "换货订单/换货退货是否计入应收", description: "换货订单/换货退货是否计入应收：0=不计入，1=计入", type: "binary", off: "不计入", on: "计入" },
+  { key: "giftItemParticipateReconcile", label: "赠品是否参与对账", description: "赠品是否参与对账：0=不参与，1=参与", type: "binary", off: "不参与", on: "参与" },
+  { key: "giftItemRecordReceivable", label: "赠品是否计入应收", description: "赠品是否计入应收：0=不计入，1=计入", type: "binary", off: "不计入", on: "计入" },
+  { key: "emptyOrderParticipateReconcile", label: "空单是否参与对账", description: "空单是否参与对账：0=不参与，1=参与", type: "binary", off: "不参与", on: "参与" },
+  { key: "emptyOrderRecordReceivable", label: "空单是否计入应收", description: "空单是否计入应收：0=不计入，1=计入", type: "binary", off: "不计入", on: "计入" },
+  { key: "virtualItemParticipateReconcile", label: "虚拟商品是否参与对账", description: "虚拟商品是否参与对账：0=不参与，1=参与", type: "binary", off: "不参与", on: "参与" },
+  { key: "virtualItemRecordReceivable", label: "虚拟商品是否计入应收", description: "虚拟商品是否计入应收：0=不计入，1=计入", type: "binary", off: "不计入", on: "计入" },
+  { key: "otherErpDeliveryParticipateReconcile", label: "其他ERP发货是否参与对账", description: "其他ERP发货是否参与对账：0=不参与，1=参与", type: "binary", off: "不参与", on: "参与" },
+  { key: "otherErpDeliveryRecordReceivable", label: "其他ERP发货是否计入应收", description: "其他ERP发货是否计入应收：0=不计入，1=计入", type: "binary", off: "不计入", on: "计入" },
+  { key: "amountToleranceLowerLimit", label: "金额容差下限", description: "差额大于等于该值时，允许自动匹配。", type: "decimal" },
+  { key: "amountToleranceUpperLimit", label: "金额容差上限", description: "差额小于等于该值时，允许自动匹配。", type: "decimal" },
+  { key: "partialAmountWriteOff", label: "是否开启部分金额核销", description: "是否开启部分金额核销：0=不开启，1=开启", type: "binary", off: "不开启", on: "开启" },
+  { key: "afterSalesDiffNotWriteOff", label: "存在售后差异是否不核销", description: "存在售后差异是否不核销：0=需要核销，1=不核销", type: "binary", off: "需要核销", on: "不核销" },
+  { key: "returnCostDeductTiming", label: "退货成本扣减时点", description: "退货入库时处理，或在退款账单金额核销时处理退货成本。", type: "choice", choices: [{ value: "RETURN_INBOUND", label: "退货入库时扣减成本" }, { value: "REFUND_WRITEOFF", label: "退款核销时扣减成本" }] },
+  { key: "blockReason", label: "售后差异阻断原因", description: "售后差异导致退款账单不核销时，展示或记录的阻断原因。", type: "text" },
+  { key: "crossPeriodRule", label: "核销是否允许跨会计期间", description: "ALLOW=允许跨期，FORBID=不允许跨期。", type: "choice", choices: [{ value: "ALLOW", label: "允许跨期" }, { value: "FORBID", label: "不允许跨期" }] },
+];
+
 window.__validateViewer = {
   renderResponse(response) {
     const unwrapped = acceptValidateResponse(response);
@@ -270,6 +329,16 @@ function bindEvents() {
     await saveConfig();
   });
 
+  els.companyConfigCompanySelect.addEventListener("change", async () => {
+    setCompanyForActiveModule(els.companyConfigCompanySelect.value);
+    await loadCompanyConfig();
+  });
+
+  els.companyConfigForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await saveCompanyConfig();
+  });
+
   els.uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await validateExcel();
@@ -278,6 +347,25 @@ function bindEvents() {
   els.documentQueryForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await queryDocumentByPlatformOrderNo();
+  });
+
+  els.testCaseQueryForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    state.testCaseQuery.pageNo = 1;
+    await loadTestCases();
+  });
+
+  els.testCaseCompanySelect.addEventListener("change", async () => {
+    setCompanyForActiveModule(els.testCaseCompanySelect.value);
+    state.testCaseQuery.pageNo = 1;
+    await loadTestCases();
+  });
+
+  els.openRecordTestCaseButton.addEventListener("click", openRecordTestCaseDialog);
+  els.closeRecordTestCaseButton.addEventListener("click", () => els.recordTestCaseDialog.close());
+  els.recordTestCaseForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await recordTestCase();
   });
 
   els.jsonImportForm.addEventListener("submit", (event) => {
@@ -321,6 +409,51 @@ function bindEvents() {
     const switcher = event.target.closest("[data-switch-tab]");
     if (switcher) {
       switchTab(switcher.dataset.switchTab);
+      return;
+    }
+
+    const testCasePage = event.target.closest("[data-test-case-page]");
+    if (testCasePage) {
+      const pageNo = Number(testCasePage.dataset.testCasePage);
+      if (Number.isInteger(pageNo) && pageNo > 0 && pageNo !== state.testCaseQuery.pageNo) {
+        state.testCaseQuery.pageNo = pageNo;
+        loadTestCases();
+      }
+      return;
+    }
+
+    const testCaseDetail = event.target.closest("[data-test-case-detail]");
+    if (testCaseDetail) {
+      showTestCaseDetail(Number(testCaseDetail.dataset.testCaseDetail));
+      return;
+    }
+
+    const testCaseDelete = event.target.closest("[data-test-case-delete]");
+    if (testCaseDelete) {
+      deleteTestCase(Number(testCaseDelete.dataset.testCaseDelete));
+      return;
+    }
+
+    const testCaseEditTitle = event.target.closest("[data-test-case-edit-title]");
+    if (testCaseEditTitle) {
+      state.editingTestCaseTitleId = Number(testCaseEditTitle.dataset.testCaseEditTitle);
+      renderTestCases();
+      const titleInput = document.querySelector(`[data-test-case-title-input="${cssAttr(state.editingTestCaseTitleId)}"]`);
+      titleInput?.focus();
+      titleInput?.select();
+      return;
+    }
+
+    const testCaseSaveTitle = event.target.closest("[data-test-case-save-title]");
+    if (testCaseSaveTitle) {
+      updateTestCaseTitle(Number(testCaseSaveTitle.dataset.testCaseSaveTitle));
+      return;
+    }
+
+    const testCaseCancelTitle = event.target.closest("[data-test-case-cancel-title]");
+    if (testCaseCancelTitle) {
+      state.editingTestCaseTitleId = null;
+      renderTestCases();
       return;
     }
 
@@ -405,6 +538,8 @@ async function loadConfig() {
     state.companyByModule = { ...state.defaultCompanyByModule };
     state.validatePath = payload.validatePath || state.validatePath;
     state.documentQueryPath = payload.documentQueryPath || state.documentQueryPath;
+    state.testCasePageListPath = payload.testCasePageListPath || state.testCasePageListPath;
+    state.testCasePageInfoPath = payload.testCasePageInfoPath || state.testCasePageInfoPath;
     applyConfig(payload.config || {});
   } catch (error) {
     showToast(`配置读取失败：${error.message}`);
@@ -459,8 +594,14 @@ function getSelectedEnvironment() {
 
 function updateEnvSummary() {
   const env = state.environments[state.config.environment] || {};
-  const baseUrl = env.baseUrl || "";
-  const path = state.activeModule === "documents" ? state.documentQueryPath : state.validatePath;
+  const baseUrl = state.activeModule === "company-config" ? state.companyConfigBaseUrl : env.baseUrl || "";
+  const path = state.activeModule === "documents"
+    ? state.documentQueryPath
+    : state.activeModule === "test-cases"
+      ? state.testCasePageListPath
+    : state.activeModule === "company-config"
+      ? "/cloudaccount/config/company/getByCompanyId"
+      : state.validatePath;
   els.envSummary.textContent = `${env.label || state.config.environment} · ${baseUrl}${path.replace(/^\//, "")}`;
 }
 
@@ -481,6 +622,15 @@ function renderCompanyOptions() {
   els.companySelect.innerHTML = state.companies
     .map((company) => `<option value="${escapeAttr(company.companyId)}">${escapeHtml(company.name)}</option>`)
     .join("");
+  els.companyConfigCompanySelect.innerHTML = state.companies
+    .map((company) => `<option value="${escapeAttr(company.companyId)}">${escapeHtml(company.name)}（${escapeHtml(company.companyId)}）</option>`)
+    .join("");
+  els.testCaseCompanySelect.innerHTML = state.companies
+    .map((company) => `<option value="${escapeAttr(company.companyId)}">${escapeHtml(company.name)}（${escapeHtml(company.companyId)}）</option>`)
+    .join("");
+  els.recordTestCaseCompanySelect.innerHTML = state.companies
+    .map((company) => `<option value="${escapeAttr(company.companyId)}">${escapeHtml(company.name)}（${escapeHtml(company.companyId)}）</option>`)
+    .join("");
 }
 
 function defaultCompanyForModule(module) {
@@ -489,6 +639,10 @@ function defaultCompanyForModule(module) {
 
 function selectedCompanyId() {
   return state.companyByModule[state.activeModule] || defaultCompanyForModule(state.activeModule);
+}
+
+function selectedCompanyConfigId() {
+  return String(els.companyConfigCompanySelect.value || "").trim();
 }
 
 function selectedCompany() {
@@ -502,6 +656,12 @@ function setCompanyForActiveModule(companyId) {
   if (els.companySelect.value !== normalizedCompanyId) {
     els.companySelect.value = normalizedCompanyId;
   }
+  if (els.companyConfigCompanySelect.value !== normalizedCompanyId) {
+    els.companyConfigCompanySelect.value = normalizedCompanyId;
+  }
+  if (els.testCaseCompanySelect.value !== normalizedCompanyId) {
+    els.testCaseCompanySelect.value = normalizedCompanyId;
+  }
   updateRequestText();
 }
 
@@ -511,6 +671,152 @@ function updateRequestText() {
   els.companyHint.textContent = company.companyId ? `companyId=${company.companyId}` : "请选择公司";
   els.uploadPathText.textContent = `POST ${state.validatePath} · companyId=${company.companyId || "-"}`;
   els.documentQueryPathText.textContent = `GET ${state.documentQueryPath}?platformOrderNo=...&companyId=${company.companyId || "-"}`;
+  els.companyConfigCompanyHint.textContent = company.companyId ? `companyId=${company.companyId}` : "请选择公司";
+}
+
+async function loadCompanyConfig() {
+  const companyId = selectedCompanyConfigId();
+  if (!companyId) return;
+  state.companyConfigLoading = true;
+  els.companyConfigLoading.classList.remove("hidden");
+  els.saveCompanyConfigButton.disabled = true;
+  try {
+    const params = new URLSearchParams({ companyId });
+    const response = await fetch(`/api/company-config?${params.toString()}`);
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || `获取失败（HTTP ${payload.targetStatus || response.status}）`);
+    }
+    const config = unwrapCompanyConfigResponse(payload.response);
+    state.companyConfig = { ...config, companyId: String(companyId) };
+    renderCompanyConfigFields();
+    setInlineStatus(els.saveCompanyConfigStatus, "当前配置已加载", "success");
+  } catch (error) {
+    state.companyConfig = { companyId: String(companyId) };
+    renderCompanyConfigFields();
+    setInlineStatus(els.saveCompanyConfigStatus, error.message, "error");
+    showToast(`核销配置读取失败：${error.message}`);
+  } finally {
+    state.companyConfigLoading = false;
+    els.companyConfigLoading.classList.add("hidden");
+    els.saveCompanyConfigButton.disabled = false;
+  }
+}
+
+function unwrapCompanyConfigResponse(response) {
+  if (!response || response.rawText) {
+    throw new Error(response?.rawText?.slice(0, 300) || "接口返回为空");
+  }
+  const failed = response.result !== undefined && Number(response.result) !== 200 && response.success !== true;
+  if (failed) {
+    throw new Error(response.errorMessage || response.message || response.errorCode || "业务接口返回失败");
+  }
+  const config = response.data ?? response;
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("接口返回的配置格式不正确");
+  }
+  return config;
+}
+
+function renderCompanyConfigFields() {
+  const config = state.companyConfig || {};
+  els.companyConfigFields.innerHTML = [
+    ...COMPANY_CONFIG_FIELDS.map((field) => renderCompanyConfigField(field, config[field.key])),
+    `<div class="company-config-field readonly-field">
+      <div class="company-config-field-meta"><label class="field-label">最后修改时间</label><div class="field-hint">字段：updatedAt；系统自动维护，不能编辑。</div></div>
+      <output class="readonly-value">${escapeHtml(formatDateTime(config.updatedAt))}</output>
+    </div>`,
+  ].join("");
+}
+
+function renderCompanyConfigField(field, value) {
+  const inputId = `company-config-${field.key}`;
+  let control = "";
+  if (field.type === "binary") {
+    control = renderCompanyConfigRadioGroup(field, value, [{ value: "0", label: field.off }, { value: "1", label: field.on }]);
+  } else if (field.type === "choice") {
+    control = renderCompanyConfigRadioGroup(field, value, field.choices);
+  } else if (field.type === "decimal") {
+    control = `<input id="${inputId}" data-company-config-field="${field.key}" type="text" inputmode="decimal" autocomplete="off" placeholder="暂不填写" value="${escapeAttr(value ?? "")}" />`;
+  } else {
+    control = `<input id="${inputId}" data-company-config-field="${field.key}" type="text" autocomplete="off" placeholder="暂不填写" value="${escapeAttr(value ?? "")}" />`;
+  }
+  return `<div class="company-config-field">
+    <div class="company-config-field-meta"><label class="field-label" for="${inputId}">${escapeHtml(field.label)}</label><div class="field-hint">${escapeHtml(field.description)}</div></div>
+    <div class="company-config-control">${control}</div>
+  </div>`;
+}
+
+function renderCompanyConfigRadioGroup(field, value, choices) {
+  const isUnset = value === null || value === undefined || value === "";
+  const selected = isUnset ? "" : String(value);
+  const items = isUnset ? [{ value: "", label: "暂不选择" }, ...choices] : choices;
+  return `<div class="company-config-radio-group">${items.map((item) => {
+    const id = `company-config-${field.key}-${item.value || "unset"}`;
+    return `<label class="company-config-radio${selected === item.value ? " active" : ""}" for="${id}">
+      <input id="${id}" data-company-config-field="${field.key}" type="radio" name="company-config-${field.key}" value="${escapeAttr(item.value)}"${selected === item.value ? " checked" : ""} />
+      <span>${escapeHtml(item.label)}</span>
+    </label>`;
+  }).join("")}</div>`;
+}
+
+function companyConfigFormPayload() {
+  const companyId = selectedCompanyConfigId();
+  if (!companyId) {
+    throw new Error("请选择公司");
+  }
+  // 以核销配置页顶部下拉框的当前值为准，不使用其他菜单的公司选择状态。
+  const payload = { companyId };
+  for (const field of COMPANY_CONFIG_FIELDS) {
+    const inputs = els.companyConfigFields.querySelectorAll(`[data-company-config-field="${cssAttr(field.key)}"]`);
+    let value;
+    if (field.type === "binary" || field.type === "choice") {
+      value = [...inputs].find((input) => input.checked)?.value ?? "";
+    } else {
+      value = inputs[0]?.value.trim() ?? "";
+    }
+    if (field.type === "binary") {
+      payload[field.key] = value === "" ? null : Number(value);
+    } else {
+      payload[field.key] = value === "" ? null : value;
+    }
+  }
+  return payload;
+}
+
+async function saveCompanyConfig() {
+  setInlineStatus(els.saveCompanyConfigStatus, "保存中...");
+  els.saveCompanyConfigButton.disabled = true;
+  try {
+    const response = await fetch("/api/company-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(companyConfigFormPayload()),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || `保存失败（HTTP ${payload.targetStatus || response.status}）`);
+    }
+    const result = payload.response || {};
+    if (result.result !== undefined && Number(result.result) !== 200 && result.success !== true) {
+      throw new Error(result.errorMessage || result.message || "业务接口保存失败");
+    }
+    await loadCompanyConfig();
+    setInlineStatus(els.saveCompanyConfigStatus, "已保存并刷新当前配置", "success");
+    showToast("核销配置已保存");
+  } catch (error) {
+    setInlineStatus(els.saveCompanyConfigStatus, error.message, "error");
+    showToast(`保存失败：${error.message}`);
+  } finally {
+    els.saveCompanyConfigButton.disabled = false;
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) return "暂无修改记录";
+  if (typeof value === "string") return value.replace("T", " ");
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false });
 }
 
 async function saveConfig() {
@@ -629,6 +935,293 @@ async function queryDocumentByPlatformOrderNo() {
     showToast(`查询失败：${error.message}`);
   } finally {
     els.documentQueryButton.disabled = false;
+  }
+}
+
+function openRecordTestCaseDialog() {
+  const defaultCompanyId = defaultCompanyForModule("test-cases");
+  els.recordTestCaseCompanySelect.value = defaultCompanyId;
+  els.recordTestCasePlatformOrderInput.value = "";
+  setInlineStatus(els.recordTestCaseStatus, "");
+  els.recordTestCaseDialog.showModal();
+  window.requestAnimationFrame(() => els.recordTestCasePlatformOrderInput.focus());
+}
+
+async function recordTestCase() {
+  const companyId = String(els.recordTestCaseCompanySelect.value || "").trim();
+  const platformOrderNo = els.recordTestCasePlatformOrderInput.value.trim();
+  if (!companyId) {
+    setInlineStatus(els.recordTestCaseStatus, "请选择公司", "error");
+    return;
+  }
+  if (!platformOrderNo) {
+    setInlineStatus(els.recordTestCaseStatus, "请输入平台订单号", "error");
+    els.recordTestCasePlatformOrderInput.focus();
+    return;
+  }
+
+  els.recordTestCaseButton.disabled = true;
+  setInlineStatus(els.recordTestCaseStatus, "正在录制...");
+  try {
+    const response = await fetch("/api/test-case-record", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId,
+        platformOrderNo,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+
+    const testCaseId = unwrapTestCaseResponse(proxyPayload.response, "录制");
+    if (testCaseId === null || testCaseId === undefined || testCaseId === "") {
+      throw new Error("录制接口未返回用例编号");
+    }
+
+    els.recordTestCaseDialog.close();
+    setCompanyForActiveModule(companyId);
+    state.testCaseQuery.pageNo = 1;
+    state.testCaseQuery.status = "";
+    els.testCasePlatformOrderInput.value = "";
+    els.testCaseStatusSelect.value = "";
+    await loadTestCases();
+    showToast(`录制成功，用例编号：${testCaseId}`);
+  } catch (error) {
+    setInlineStatus(els.recordTestCaseStatus, error.message, "error");
+    showToast(`录制失败：${error.message}`);
+  } finally {
+    els.recordTestCaseButton.disabled = false;
+  }
+}
+
+function testCaseRequestPayload() {
+  const platformOrderNo = els.testCasePlatformOrderInput.value.trim();
+  const status = els.testCaseStatusSelect.value;
+  state.testCaseQuery.platformOrderNo = platformOrderNo;
+  state.testCaseQuery.status = status;
+  return {
+    environment: getSelectedEnvironment(),
+    companyId: selectedCompanyId(),
+    platformOrderNo: platformOrderNo || undefined,
+    status: status === "" ? undefined : Number(status),
+    pageNo: state.testCaseQuery.pageNo,
+    pageSize: state.testCaseQuery.pageSize,
+  };
+}
+
+async function loadTestCases() {
+  const requestPayload = testCaseRequestPayload();
+  setRequestState("running", "查询中");
+  els.testCaseQueryButton.disabled = true;
+  setInlineStatus(els.testCaseQueryStatus, "");
+
+  try {
+    const response = await fetch("/api/test-cases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestPayload),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      const statuses = Object.values(proxyPayload.targetStatus || {}).join("/");
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${statuses || response.status}`);
+    }
+
+    const list = unwrapTestCaseResponse(proxyPayload.response?.list, "列表");
+    const pageInfo = unwrapTestCaseResponse(proxyPayload.response?.pageInfo, "分页信息");
+    if (!Array.isArray(list)) {
+      throw new Error("列表接口返回的 data 不是数组");
+    }
+    if (!pageInfo || typeof pageInfo !== "object" || Array.isArray(pageInfo)) {
+      throw new Error("分页接口返回的 data 格式不正确");
+    }
+
+    state.testCases = list;
+    state.testCasePageInfo = {
+      total: Number(pageInfo.total || 0),
+      pageNo: Number(pageInfo.pageNo || state.testCaseQuery.pageNo),
+      pageSize: Number(pageInfo.pageSize || state.testCaseQuery.pageSize),
+    };
+    state.testCaseQuery.pageNo = state.testCasePageInfo.pageNo;
+    state.testCaseQuery.pageSize = state.testCasePageInfo.pageSize;
+    state.testCasesLoaded = true;
+    state.testCaseRawResponse = proxyPayload.response;
+    renderTestCases();
+    setRequestState("success", "查询完成");
+    setInlineStatus(els.testCaseQueryStatus, "");
+    syncDownloadButton();
+  } catch (error) {
+    setRequestState("error", "查询失败");
+    setInlineStatus(els.testCaseQueryStatus, error.message, "error");
+    showToast(`测试用例查询失败：${error.message}`);
+  } finally {
+    els.testCaseQueryButton.disabled = false;
+  }
+}
+
+function unwrapTestCaseResponse(response, name) {
+  if (!response || response.rawText) {
+    throw new Error(`${name}接口返回为空或不是 JSON`);
+  }
+  const failed = response.result !== undefined && Number(response.result) !== 200 && response.success !== true;
+  if (failed) {
+    throw new Error(response.errorMessage || response.message || `${name}接口业务处理失败`);
+  }
+  return response.data ?? response;
+}
+
+function renderTestCases() {
+  const records = state.testCases || [];
+  els.testCaseTableBody.innerHTML = records.map((record) => {
+    const status = testCaseStatus(record.status);
+    const isEditingTitle = Number(record.id) === state.editingTestCaseTitleId;
+    const titleCell = isEditingTitle
+      ? `<div class="test-case-title-editor">
+          <input data-test-case-title-input="${escapeAttr(record.id)}" type="text" value="${escapeAttr(displayValue(record.title))}" aria-label="用例标题" />
+          <button class="test-case-title-save" type="button" data-test-case-save-title="${escapeAttr(record.id)}">保存</button>
+          <button class="test-case-title-cancel" type="button" data-test-case-cancel-title="${escapeAttr(record.id)}">取消</button>
+        </div>`
+      : `<div class="test-case-title-cell">
+          <span>${escapeHtml(displayValue(record.title) || "-")}</span>
+          <button class="test-case-title-edit" type="button" data-test-case-edit-title="${escapeAttr(record.id)}">编辑</button>
+        </div>`;
+    return `<tr>
+      <td class="number-cell">${numberText(record.id)}</td>
+      <td>${titleCell}</td>
+      <td class="mono-cell">${escapeHtml(displayValue(record.platformOrderNo) || "-")}</td>
+      <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
+      <td class="number-cell">${escapeHtml(formatDateTime(record.createdAt))}</td>
+      <td class="number-cell">${escapeHtml(formatDateTime(record.updatedAt))}</td>
+      <td class="test-case-actions">
+        <button class="test-case-action" type="button" data-test-case-detail="${escapeAttr(record.id)}">查看</button>
+        <button class="test-case-action danger" type="button" data-test-case-delete="${escapeAttr(record.id)}">删除</button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  const hasRecords = records.length > 0;
+  els.testCaseEmpty.classList.toggle("hidden", hasRecords);
+  if (!hasRecords) {
+    els.testCaseEmpty.textContent = state.testCasesLoaded ? "没有符合条件的测试用例。" : "点击查询获取测试用例。";
+  }
+  renderTestCasePagination();
+}
+
+function testCaseStatus(value) {
+  const status = Number(value);
+  if (status === 0) return { label: "待处理", tone: "warning" };
+  if (status === 1) return { label: "已完成", tone: "success" };
+  if (status === 2) return { label: "作废", tone: "error" };
+  return { label: value === null || value === undefined || value === "" ? "-" : String(value), tone: "" };
+}
+
+function renderTestCasePagination() {
+  const { total, pageNo, pageSize } = state.testCasePageInfo;
+  const pageCount = Math.ceil(total / pageSize);
+  els.testCasePagination.classList.toggle("hidden", pageCount <= 1);
+  if (pageCount <= 1) {
+    els.testCasePagination.innerHTML = "";
+    return;
+  }
+
+  const pages = new Set([1, pageCount, pageNo - 1, pageNo, pageNo + 1]);
+  const items = [...pages].filter((page) => page >= 1 && page <= pageCount).sort((a, b) => a - b);
+  let previous = 0;
+  const pageButtons = items.map((page) => {
+    const gap = page - previous > 1 ? `<span class="pagination-gap">…</span>` : "";
+    previous = page;
+    return `${gap}<button type="button" class="${page === pageNo ? "active" : ""}" data-test-case-page="${page}">${page}</button>`;
+  }).join("");
+  els.testCasePagination.innerHTML = `
+    <button type="button" ${pageNo <= 1 ? "disabled" : ""} data-test-case-page="${pageNo - 1}" aria-label="上一页">‹</button>
+    ${pageButtons}
+    <button type="button" ${pageNo >= pageCount ? "disabled" : ""} data-test-case-page="${pageNo + 1}" aria-label="下一页">›</button>`;
+}
+
+function showTestCaseDetail(id) {
+  const record = state.testCases.find((item) => Number(item.id) === id);
+  if (!record) return;
+  els.testCaseDetailSummary.textContent = `用例详情：${displayValue(record.title) || `#${id}`}`;
+  els.testCaseDetailContent.textContent = JSON.stringify(record, null, 2);
+  els.testCaseDetail.classList.remove("hidden");
+  els.testCaseDetail.open = true;
+  els.testCaseDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function updateTestCaseTitle(id) {
+  const titleInput = document.querySelector(`[data-test-case-title-input="${cssAttr(id)}"]`);
+  const title = titleInput?.value.trim() || "";
+  if (!title) {
+    showToast("用例标题不能为空");
+    titleInput?.focus();
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/test-case-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId: selectedCompanyId(),
+        id,
+        title,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+    const updatedCount = unwrapTestCaseResponse(proxyPayload.response, "修改");
+    if (Number(updatedCount) < 1) {
+      throw new Error("未找到可修改的测试用例");
+    }
+
+    state.editingTestCaseTitleId = null;
+    await loadTestCases();
+    showToast("用例标题已更新");
+  } catch (error) {
+    showToast(`修改失败：${error.message}`);
+  }
+}
+
+async function deleteTestCase(id) {
+  const record = state.testCases.find((item) => Number(item.id) === id);
+  if (!record || !Number.isInteger(id) || id < 1) return;
+  const label = displayValue(record.title) || `用例 #${id}`;
+  if (!window.confirm(`确认删除“${label}”吗？此操作不可恢复。`)) return;
+
+  setRequestState("running", "删除中");
+  try {
+    const response = await fetch("/api/test-case-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId: selectedCompanyId(),
+        id,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+    const deletedCount = unwrapTestCaseResponse(proxyPayload.response, "删除");
+    if (Number(deletedCount) < 1) {
+      throw new Error("未找到可删除的测试用例");
+    }
+
+    els.testCaseDetail.classList.add("hidden");
+    els.testCaseDetail.open = false;
+    await loadTestCases();
+    showToast("测试用例已删除");
+  } catch (error) {
+    setRequestState("error", "删除失败");
+    showToast(`删除失败：${error.message}`);
   }
 }
 
@@ -1508,7 +2101,7 @@ function rowKey(tabId, rowIndex) {
 }
 
 function switchModule(module) {
-  if (!["validate", "documents"].includes(module)) return;
+  if (!["validate", "documents", "company-config", "test-cases"].includes(module)) return;
   state.activeModule = module;
   document.body.dataset.module = module;
   setCompanyForActiveModule(defaultCompanyForModule(module));
@@ -1520,19 +2113,33 @@ function switchModule(module) {
     panel.classList.toggle("hidden", panel.dataset.modulePanel !== module);
   });
 
-  els.configTitle.textContent = module === "documents" ? "系统配置" : "系统配置";
+  els.configTitle.textContent = "系统配置";
   els.configSubtitle.textContent = module === "documents"
     ? "选择环境和公司，输入平台订单号查询单据。"
     : "选择环境和公司，上传预期结果 Excel。";
 
-  document.querySelector(".brand-mark").textContent = module === "documents" ? "单" : "验";
-  document.querySelector(".brand-title").textContent = module === "documents" ? "导入运行结果单据查看" : "导入运行结果校验";
+  document.querySelector(".brand-mark").textContent = module === "documents" ? "单" : module === "company-config" ? "核" : module === "test-cases" ? "例" : "验";
+  document.querySelector(".brand-title").textContent = module === "documents"
+    ? "导入运行结果单据查看"
+    : module === "company-config"
+      ? "核销配置"
+      : module === "test-cases"
+        ? "导入测试用例"
+      : "导入运行结果校验";
   updateEnvSummary();
   renderModuleTabs();
 
-  const nextTab = tabAvailableForModule(state.lastTabs[module], module) ? state.lastTabs[module] : "config";
+  const nextTab = module === "company-config"
+    ? "company-config"
+    : tabAvailableForModule(state.lastTabs[module], module) ? state.lastTabs[module] : module === "test-cases" ? "test-cases" : "config";
   switchTab(nextTab);
   syncDownloadButton();
+  if (module === "company-config") {
+    loadCompanyConfig();
+  }
+  if (module === "test-cases" && !state.testCasesLoaded) {
+    loadTestCases();
+  }
 }
 
 function renderModuleTabs() {
@@ -1573,19 +2180,30 @@ function setInlineStatus(element, text, type = "") {
 }
 
 function syncDownloadButton() {
-  const raw = state.activeModule === "documents" ? state.documentRawResponse : state.rawResponse;
+  const raw = state.activeModule === "documents"
+    ? state.documentRawResponse
+    : state.activeModule === "test-cases"
+      ? state.testCaseRawResponse
+      : state.activeModule === "validate"
+        ? state.rawResponse
+        : null;
   els.downloadJsonButton.disabled = !raw;
 }
 
 function downloadRawJson() {
-  const raw = state.activeModule === "documents" ? state.documentRawResponse : state.rawResponse;
+  const raw = state.activeModule === "documents"
+    ? state.documentRawResponse
+    : state.activeModule === "test-cases"
+      ? state.testCaseRawResponse
+      : state.rawResponse;
   if (!raw) return;
   const blob = new Blob([JSON.stringify(raw, null, 2)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   link.href = url;
-  link.download = `${state.activeModule === "documents" ? "document-result" : "validate-result"}-${stamp}.json`;
+  const prefix = state.activeModule === "documents" ? "document-result" : state.activeModule === "test-cases" ? "test-case-result" : "validate-result";
+  link.download = `${prefix}-${stamp}.json`;
   document.body.appendChild(link);
   link.click();
   link.remove();

@@ -27,6 +27,8 @@
       <aside class="module-sidebar" aria-label="主菜单">
         <button class="module-menu active" type="button" data-module-switch="validate">导入校验</button>
         <button class="module-menu" type="button" data-module-switch="documents">查看单据</button>
+        <button class="module-menu" type="button" data-module-switch="company-config">核销配置</button>
+        <button class="module-menu" type="button" data-module-switch="test-cases">测试用例</button>
       </aside>
 
       <div class="workspace">
@@ -46,6 +48,7 @@
           <button class="tab" type="button" data-module="documents" data-tab="doc-afterSalesExceptionList">售后差异监控</button>
           <button class="tab" type="button" data-module="documents" data-tab="doc-refundOnlyTrackingList">仅退款追踪</button>
           <button class="tab" type="button" data-module="documents" data-tab="doc-issuedBalanceDetailList">发出余额明细</button>
+          <button class="tab" type="button" data-module="test-cases" data-tab="test-cases">测试用例</button>
         </nav>
 
       <section class="page active" id="page-config" data-page="config">
@@ -120,6 +123,86 @@
               <span class="inline-status" id="jsonImportStatus"></span>
             </div>
           </form>
+        </details>
+      </section>
+
+      <section class="page" id="page-company-config" data-page="company-config">
+        <div class="page-title-row">
+          <div>
+            <h1>核销配置</h1>
+            <p class="muted">按公司查看并维护云账核销配置。每项配置均展示字段说明。</p>
+          </div>
+        </div>
+
+        <form class="company-config-form" id="companyConfigForm">
+          <div class="company-config-company-row">
+            <label class="field-label" for="companyConfigCompanySelect">公司</label>
+            <select class="company-config-company-select" id="companyConfigCompanySelect" aria-describedby="companyConfigCompanyHint"></select>
+            <div class="field-hint" id="companyConfigCompanyHint">companyId=-</div>
+          </div>
+          <div class="company-config-loading hidden" id="companyConfigLoading">正在获取当前配置…</div>
+          <div class="company-config-fields" id="companyConfigFields"></div>
+          <div class="button-row company-config-actions">
+            <button class="primary-button" id="saveCompanyConfigButton" type="submit">保存核销配置</button>
+            <span class="inline-status" id="saveCompanyConfigStatus"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="page" id="page-test-cases" data-page="test-cases">
+        <div class="page-title-row">
+          <div>
+            <h1>测试用例</h1>
+            <p class="muted">按平台订单号和状态查询已录制的导入测试用例。</p>
+          </div>
+          <div class="toolbar">
+            <button class="secondary-button" id="openRecordTestCaseButton" type="button">录制用例</button>
+          </div>
+        </div>
+
+        <form class="test-case-query-form" id="testCaseQueryForm">
+          <div class="test-case-filter test-case-company">
+            <label for="testCaseCompanySelect">公司</label>
+            <select id="testCaseCompanySelect"></select>
+          </div>
+          <div class="test-case-filter">
+            <label for="testCasePlatformOrderInput">平台订单号</label>
+            <input id="testCasePlatformOrderInput" type="text" autocomplete="off" placeholder="平台订单号" />
+          </div>
+          <div class="test-case-filter">
+            <label for="testCaseStatusSelect">状态</label>
+            <select id="testCaseStatusSelect">
+              <option value="">全部状态</option>
+              <option value="0">待处理</option>
+              <option value="1">已完成</option>
+              <option value="2">作废</option>
+            </select>
+          </div>
+          <button class="primary-button" id="testCaseQueryButton" type="submit">查询</button>
+          <span class="inline-status test-case-query-status" id="testCaseQueryStatus"></span>
+        </form>
+
+        <div class="table-wrap test-case-table-wrap">
+          <table class="data-table test-case-table">
+            <thead>
+              <tr>
+                <th>用例编号</th>
+                <th>用例标题</th>
+                <th>平台订单号</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="testCaseTableBody"></tbody>
+          </table>
+        </div>
+        <div class="test-case-empty" id="testCaseEmpty">点击查询获取测试用例。</div>
+        <nav class="pagination hidden" id="testCasePagination" aria-label="测试用例分页"></nav>
+        <details class="test-case-detail hidden" id="testCaseDetail">
+          <summary id="testCaseDetailSummary">用例详情</summary>
+          <pre id="testCaseDetailContent"></pre>
         </details>
       </section>
 
@@ -202,6 +285,27 @@
       <div id="documentPages"></div>
       </div>
     </main>
+
+    <dialog class="record-test-case-dialog" id="recordTestCaseDialog" aria-labelledby="recordTestCaseTitle">
+      <form class="record-test-case-form" id="recordTestCaseForm">
+        <div class="record-test-case-head">
+          <h2 id="recordTestCaseTitle">录制用例</h2>
+          <button class="dialog-close" id="closeRecordTestCaseButton" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="test-case-filter">
+          <label for="recordTestCaseCompanySelect">公司</label>
+          <select id="recordTestCaseCompanySelect"></select>
+        </div>
+        <div class="test-case-filter">
+          <label for="recordTestCasePlatformOrderInput">平台订单号</label>
+          <input id="recordTestCasePlatformOrderInput" type="text" autocomplete="off" placeholder="请输入平台订单号" required />
+        </div>
+        <div class="button-row record-test-case-actions">
+          <button class="primary-button" id="recordTestCaseButton" type="submit">录制</button>
+          <span class="inline-status" id="recordTestCaseStatus"></span>
+        </div>
+      </form>
+    </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="/static/app.js"></script>

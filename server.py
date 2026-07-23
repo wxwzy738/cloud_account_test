@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -23,6 +23,14 @@ STATIC_DIR = ROOT / "static"
 CONFIG_FILE = ROOT / "config.json"
 VALIDATE_PATH = "/cloudaccount/importTestData/validateExcel"
 DOCUMENT_QUERY_PATH = "/cloudaccount/importTestData/platformOrderNo"
+TEST_CASE_PAGE_LIST_PATH = "/cloudaccount/testCase/pageList"
+TEST_CASE_PAGE_INFO_PATH = "/cloudaccount/testCase/pageInfo"
+TEST_CASE_RECORD_PATH = "/cloudaccount/testCase/record"
+TEST_CASE_DELETE_PATH = "/cloudaccount/testCase/deleteById"
+TEST_CASE_UPDATE_PATH = "/cloudaccount/testCase/updateById"
+COMPANY_CONFIG_GET_PATH = "/cloudaccount/config/company/getByCompanyId"
+COMPANY_CONFIG_SAVE_PATH = "/cloudaccount/config/company/insertOrUpdate"
+COMPANY_CONFIG_BASE_URL = "https://pubcloud3.superboss.cc/"
 OPENAPI_SCHEMA_URL = "https://pubcloud3.superboss.cc/v3/api-docs/cloud-account"
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 300
@@ -42,12 +50,12 @@ ENVIRONMENTS = {
 
 COMPANIES = [
     {
-        "name": "咖啡测试3",
-        "companyId": "10438",
-    },
-    {
         "name": "德赛集团",
         "companyId": "37041",
+    },
+    {
+        "name": "咖啡测试3",
+        "companyId": "10438",
     },
 ]
 
@@ -55,6 +63,8 @@ COMPANY_IDS = {company["companyId"] for company in COMPANIES}
 DEFAULT_COMPANY_BY_MODULE = {
     "validate": "10438",
     "documents": "37041",
+    "company-config": "37041",
+    "test-cases": "37041",
 }
 
 DEFAULT_CONFIG = {
@@ -567,7 +577,8 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
         sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/api/config":
             self.send_json(
                 {
@@ -577,11 +588,16 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
                     "defaultCompanyByModule": DEFAULT_COMPANY_BY_MODULE,
                     "validatePath": VALIDATE_PATH,
                     "documentQueryPath": DOCUMENT_QUERY_PATH,
+                    "testCasePageListPath": TEST_CASE_PAGE_LIST_PATH,
+                    "testCasePageInfoPath": TEST_CASE_PAGE_INFO_PATH,
                 }
             )
             return
         if path == "/api/document-labels":
             self.send_json(extract_schema_labels())
+            return
+        if path == "/api/company-config":
+            self.proxy_company_config_get_request(parse_qs(parsed_url.query))
             return
         if path == "/api/health":
             self.send_json({"ok": True})
@@ -598,6 +614,21 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/document-query":
             self.proxy_document_query_request()
+            return
+        if path == "/api/test-cases":
+            self.proxy_test_case_query_request()
+            return
+        if path == "/api/test-case-record":
+            self.proxy_test_case_record_request()
+            return
+        if path == "/api/test-case-delete":
+            self.proxy_test_case_delete_request()
+            return
+        if path == "/api/test-case-update":
+            self.proxy_test_case_update_request()
+            return
+        if path == "/api/company-config":
+            self.proxy_company_config_save_request()
             return
         self.send_json({"ok": False, "message": "接口不存在"}, HTTPStatus.NOT_FOUND)
 
@@ -821,6 +852,379 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
                 "targetUrl": target_url,
                 "contentType": target_headers.get("Content-Type"),
                 "response": target_payload,
+            },
+            HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def proxy_test_case_query_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.pop("environment", None) or config.get("environment")
+        if environment not in ENVIRONMENTS:
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.pop("companyId", None))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        page_no = payload.get("pageNo", 1)
+        page_size = payload.get("pageSize", 20)
+        if not isinstance(page_no, int) or page_no < 1:
+            self.send_json({"ok": False, "message": "页码必须为大于 0 的整数"}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(page_size, int) or not 1 <= page_size <= 500:
+            self.send_json({"ok": False, "message": "每页数量必须在 1 到 500 之间"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        # 只转发后端 QueryYzImportTestCaseReq 支持的字段，避免页面字段被透传。
+        query_payload = {
+            field: payload[field]
+            for field in ("title", "platformOrderNo", "status", "createdAtStart", "createdAtEnd", "pageNo", "pageSize")
+            if payload.get(field) not in (None, "")
+        }
+        query_payload.setdefault("pageNo", page_no)
+        query_payload.setdefault("pageSize", page_size)
+        save_config({"environment": environment})
+
+        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        query_string = urlencode({"companyId": company_id})
+        body = json_bytes(query_payload)
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Length": str(len(body)),
+            "User-Agent": self.server_version,
+            "Referer": base_url,
+        }
+        targets = {
+            "list": urljoin(base_url, TEST_CASE_PAGE_LIST_PATH.lstrip("/")) + "?" + query_string,
+            "pageInfo": urljoin(base_url, TEST_CASE_PAGE_INFO_PATH.lstrip("/")) + "?" + query_string,
+        }
+        responses: dict[str, Any] = {}
+        statuses: dict[str, int] = {}
+        for key, target_url in targets.items():
+            request = Request(target_url, data=body, headers=headers, method="POST")
+            try:
+                with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                    statuses[key] = response.status
+                    responses[key] = decode_target_response(response.read())
+            except HTTPError as exc:
+                statuses[key] = exc.code
+                responses[key] = decode_target_response(exc.read())
+            except URLError as exc:
+                self.send_json(
+                    {"ok": False, "message": f"无法访问目标环境：{exc.reason}", "targetUrl": target_url},
+                    HTTPStatus.BAD_GATEWAY,
+                )
+                return
+
+        is_ok = all(200 <= status < 400 for status in statuses.values())
+        self.send_json(
+            {
+                "ok": is_ok,
+                "targetStatus": statuses,
+                "targetUrl": targets,
+                "response": responses,
+            },
+            HTTPStatus.OK if all(status < 500 for status in statuses.values()) else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def proxy_test_case_record_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        platform_order_no = str(payload.get("platformOrderNo") or "").strip()
+        if not platform_order_no:
+            self.send_json({"ok": False, "message": "请输入平台订单号"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in ENVIRONMENTS:
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        target_url = urljoin(base_url, TEST_CASE_RECORD_PATH.lstrip("/")) + "?" + urlencode(
+            {"companyId": company_id, "platformOrderNo": platform_order_no}
+        )
+        request = Request(
+            target_url,
+            data=b"",
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Length": "0",
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                status = response.status
+                raw = response.read()
+                target_headers = dict(response.headers.items())
+        except HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            target_headers = dict(exc.headers.items()) if exc.headers else {}
+        except URLError as exc:
+            self.send_json(
+                {"ok": False, "message": f"无法访问目标环境：{exc.reason}", "targetUrl": target_url},
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json(
+            {
+                "ok": 200 <= status < 400,
+                "targetStatus": status,
+                "targetUrl": target_url,
+                "contentType": target_headers.get("Content-Type"),
+                "response": decode_target_response(raw),
+            },
+            HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def proxy_test_case_delete_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            test_case_id = int(payload.get("id"))
+            if test_case_id < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "message": "用例编号必须为正整数"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in ENVIRONMENTS:
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        target_url = urljoin(base_url, TEST_CASE_DELETE_PATH.lstrip("/")) + "?" + urlencode({"companyId": company_id})
+        body = json_bytes({"id": test_case_id})
+        request = Request(
+            target_url,
+            data=body,
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json; charset=utf-8",
+                "Content-Length": str(len(body)),
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                status = response.status
+                raw = response.read()
+                target_headers = dict(response.headers.items())
+        except HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            target_headers = dict(exc.headers.items()) if exc.headers else {}
+        except URLError as exc:
+            self.send_json(
+                {"ok": False, "message": f"无法访问目标环境：{exc.reason}", "targetUrl": target_url},
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json(
+            {
+                "ok": 200 <= status < 400,
+                "targetStatus": status,
+                "targetUrl": target_url,
+                "contentType": target_headers.get("Content-Type"),
+                "response": decode_target_response(raw),
+            },
+            HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def proxy_test_case_update_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            test_case_id = int(payload.get("id"))
+            if test_case_id < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "message": "用例编号必须为正整数"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        title = str(payload.get("title") or "").strip()
+        if not title:
+            self.send_json({"ok": False, "message": "用例标题不能为空"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in ENVIRONMENTS:
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        target_url = urljoin(base_url, TEST_CASE_UPDATE_PATH.lstrip("/")) + "?" + urlencode({"companyId": company_id})
+        body = json_bytes({"id": test_case_id, "title": title})
+        request = Request(
+            target_url,
+            data=body,
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json; charset=utf-8",
+                "Content-Length": str(len(body)),
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                status = response.status
+                raw = response.read()
+                target_headers = dict(response.headers.items())
+        except HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            target_headers = dict(exc.headers.items()) if exc.headers else {}
+        except URLError as exc:
+            self.send_json(
+                {"ok": False, "message": f"无法访问目标环境：{exc.reason}", "targetUrl": target_url},
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json(
+            {
+                "ok": 200 <= status < 400,
+                "targetStatus": status,
+                "targetUrl": target_url,
+                "contentType": target_headers.get("Content-Type"),
+                "response": decode_target_response(raw),
+            },
+            HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def proxy_company_config_get_request(self, query: dict[str, list[str]]) -> None:
+        try:
+            company_id = normalize_company_id((query.get("companyId") or [""])[0])
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        base_url = COMPANY_CONFIG_BASE_URL
+        target_url = urljoin(base_url, COMPANY_CONFIG_GET_PATH.lstrip("/")) + "?" + urlencode({"companyId": company_id})
+        request = Request(
+            target_url,
+            headers={"Accept": "application/json, text/plain, */*", "User-Agent": self.server_version, "Referer": base_url},
+            method="GET",
+        )
+        self.send_company_config_proxy_response(request, target_url)
+
+    def proxy_company_config_save_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        payload.pop("environment", None)
+
+        try:
+            payload["companyId"] = int(normalize_company_id(payload.get("companyId")))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        # 页面不编辑数据库主键、逻辑删除标记和审计时间，避免客户端伪造这些字段。
+        for field in ("id", "createdAt", "updatedAt", "isDeleted"):
+            payload.pop(field, None)
+
+        base_url = COMPANY_CONFIG_BASE_URL
+        target_url = urljoin(base_url, COMPANY_CONFIG_SAVE_PATH.lstrip("/"))
+        body = json_bytes(payload)
+        request = Request(
+            target_url,
+            data=body,
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json; charset=utf-8",
+                "Content-Length": str(len(body)),
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        self.send_company_config_proxy_response(request, target_url)
+
+    def send_company_config_proxy_response(self, request: Request, target_url: str) -> None:
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                status = response.status
+                raw = response.read()
+                target_headers = dict(response.headers.items())
+        except HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            target_headers = dict(exc.headers.items()) if exc.headers else {}
+        except URLError as exc:
+            self.send_json(
+                {"ok": False, "message": f"无法访问目标环境：{exc.reason}", "targetUrl": target_url},
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json(
+            {
+                "ok": 200 <= status < 400,
+                "targetStatus": status,
+                "targetUrl": target_url,
+                "contentType": target_headers.get("Content-Type"),
+                "response": decode_target_response(raw),
             },
             HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
         )
