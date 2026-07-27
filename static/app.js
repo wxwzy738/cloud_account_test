@@ -1,32 +1,46 @@
+const REPLAY_DEFAULT_COMPANY_ID = "37041";
+
 const state = {
-  config: { environment: "local" },
+  config: { environment: "auto" },
   environments: {},
   companies: [
     { name: "德赛集团", companyId: "37041" },
     { name: "咖啡测试3", companyId: "10438" },
   ],
-  defaultCompanyByModule: { validate: "10438", documents: "37041", "company-config": "37041", "test-cases": "37041" },
-  companyByModule: { validate: "10438", documents: "37041", "company-config": "37041", "test-cases": "37041" },
+  defaultCompanyByModule: { validate: "37041", documents: "37041", "company-config": "37041", "test-cases": "37041" },
+  companyByModule: { validate: "37041", documents: "37041", "company-config": "37041", "test-cases": "37041" },
   activeModule: "validate",
   lastTabs: { validate: "config", documents: "config", "test-cases": "test-cases" },
   validatePath: "/cloudaccount/importTestData/validateExcel",
   documentQueryPath: "/cloudaccount/importTestData/platformOrderNo",
   testCasePageListPath: "/cloudaccount/testCase/pageList",
   testCasePageInfoPath: "/cloudaccount/testCase/pageInfo",
+  testCaseGetPath: "/cloudaccount/testCase/getById",
+  testCaseValidateResultPath: "/cloudaccount/testCase/validateResult",
+  testCaseReplayPath: "/cloudaccount/testCase/replay",
+  validationMode: "excel",
+  validationTestCases: [],
+  validationTestCasesCompanyId: "",
   testCases: [],
   testCasePageInfo: { total: 0, pageNo: 1, pageSize: 20 },
   testCaseQuery: { pageNo: 1, pageSize: 20, platformOrderNo: "", status: "" },
   testCasesLoaded: false,
   testCaseRawResponse: null,
   editingTestCaseTitleId: null,
-  companyConfigBaseUrl: "https://pubcloud3.superboss.cc/",
+  editingTestCaseStatusId: null,
+  replayTestCaseRecord: null,
   companyConfig: {},
   companyConfigLoading: false,
   result: null,
   rawResponse: null,
+  validateSource: "excel",
+  validateTestCase: null,
   documentResult: null,
   documentRawResponse: null,
   documentPlatformOrderNo: "",
+  documentSource: "live",
+  documentTestCase: null,
+  documentEditingCell: null,
   documentLabels: {},
   documentModelLabels: {},
   documentLabelsLoaded: false,
@@ -47,6 +61,12 @@ const els = {
   configForm: document.getElementById("configForm"),
   companyConfigForm: document.getElementById("companyConfigForm"),
   uploadForm: document.getElementById("uploadForm"),
+  excelValidationPanel: document.getElementById("excelValidationPanel"),
+  testCaseValidationPanel: document.getElementById("testCaseValidationPanel"),
+  validationTestCaseSelect: document.getElementById("validationTestCaseSelect"),
+  validateTestCaseButton: document.getElementById("validateTestCaseButton"),
+  validateTestCaseStatus: document.getElementById("validateTestCaseStatus"),
+  testCaseValidatePathText: document.getElementById("testCaseValidatePathText"),
   documentQueryForm: document.getElementById("documentQueryForm"),
   jsonImportForm: document.getElementById("jsonImportForm"),
   companySelect: document.getElementById("companySelect"),
@@ -86,8 +106,16 @@ const els = {
   closeRecordTestCaseButton: document.getElementById("closeRecordTestCaseButton"),
   recordTestCaseCompanySelect: document.getElementById("recordTestCaseCompanySelect"),
   recordTestCasePlatformOrderInput: document.getElementById("recordTestCasePlatformOrderInput"),
+  recordTestCaseTitleInput: document.getElementById("recordTestCaseTitleInput"),
   recordTestCaseButton: document.getElementById("recordTestCaseButton"),
   recordTestCaseStatus: document.getElementById("recordTestCaseStatus"),
+  replayTestCaseDialog: document.getElementById("replayTestCaseDialog"),
+  replayTestCaseForm: document.getElementById("replayTestCaseForm"),
+  closeReplayTestCaseButton: document.getElementById("closeReplayTestCaseButton"),
+  replayTestCaseCompanySelect: document.getElementById("replayTestCaseCompanySelect"),
+  replayTestCaseSummary: document.getElementById("replayTestCaseSummary"),
+  replayTestCaseButton: document.getElementById("replayTestCaseButton"),
+  replayTestCaseStatus: document.getElementById("replayTestCaseStatus"),
   testCaseTableBody: document.getElementById("testCaseTableBody"),
   testCaseEmpty: document.getElementById("testCaseEmpty"),
   testCasePagination: document.getElementById("testCasePagination"),
@@ -177,6 +205,12 @@ const DOCUMENT_GROUPS = [
     collections: [{ path: ["afterSalesExceptionList"], title: "售后差异监控", model: "YzAfterSalesExceptionDO" }],
   },
   {
+    tabId: "doc-afterSalesExceptionDetailList",
+    key: "afterSalesExceptionDetailList",
+    title: "售后差异明细",
+    collections: [{ path: ["afterSalesExceptionDetailList"], title: "售后差异明细", model: "YzAfterSalesExceptionDetailDO" }],
+  },
+  {
     tabId: "doc-refundOnlyTrackingList",
     key: "refundOnlyTrackingList",
     title: "仅退款追踪",
@@ -189,6 +223,21 @@ const DOCUMENT_GROUPS = [
     collections: [{ path: ["issuedBalanceDetailList"], title: "发出余额明细", model: "YzIssuedBalanceDetailDO" }],
   },
 ];
+
+const TEST_CASE_DOCUMENT_FIELD_BY_RESULT_KEY = {
+  originalOrder: "originalOrder",
+  originalAfterSale: "originalAfterSale",
+  standardFundBillList: "standardFundBill",
+  orderStream: "orderStream",
+  arReconciliationList: "arReconciliation",
+  manualVerifyRecordList: "manualVerifyRecord",
+  arAdjustmentRecordList: "arAdjustmentRecord",
+  issuedBalanceProcessList: "issuedBalanceProcess",
+  afterSalesExceptionList: "afterSalesException",
+  afterSalesExceptionDetailList: "afterSalesExceptionDetail",
+  refundOnlyTrackingList: "refundOnlyTracking",
+  issuedBalanceDetailList: "issuedBalanceDetail",
+};
 
 const FALLBACK_FIELD_LABELS = {
   id: "主键ID",
@@ -244,6 +293,7 @@ const COMPANY_CONFIG_FIELDS = [
 
 window.__validateViewer = {
   renderResponse(response) {
+    setValidationMode("excel", { load: false });
     const unwrapped = acceptValidateResponse(response);
     switchModule("validate");
     switchTab("overview");
@@ -301,6 +351,7 @@ async function init() {
   setCompanyForActiveModule(defaultCompanyForModule(state.activeModule));
   await Promise.all([loadConfig(), loadDocumentLabels()]);
   renderDocumentAll();
+  setValidationMode("excel", { load: false });
   switchModule("validate");
 }
 
@@ -316,11 +367,13 @@ function bindEvents() {
     switchTab(tab.dataset.tab);
   });
 
-  els.configForm.addEventListener("change", (event) => {
+  els.configForm.addEventListener("change", async (event) => {
     if (event.target.name === "environment") {
       setEnvironment(event.target.value);
+      if (state.validationMode === "test-case") await loadValidationTestCases();
     } else if (event.target === els.companySelect) {
       setCompanyForActiveModule(event.target.value);
+      if (state.validationMode === "test-case") await loadValidationTestCases();
     }
   });
 
@@ -341,8 +394,16 @@ function bindEvents() {
 
   els.uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await validateExcel();
+    if (state.validationMode === "test-case") {
+      await validateTestCaseResult();
+    } else {
+      await validateExcel();
+    }
   });
+  document.querySelectorAll("[data-validation-mode]").forEach((button) => {
+    button.addEventListener("click", () => setValidationMode(button.dataset.validationMode));
+  });
+  els.validationTestCaseSelect.addEventListener("change", updateValidationTestCaseSelection);
 
   els.documentQueryForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -366,6 +427,11 @@ function bindEvents() {
   els.recordTestCaseForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await recordTestCase();
+  });
+  els.closeReplayTestCaseButton.addEventListener("click", () => els.replayTestCaseDialog.close());
+  els.replayTestCaseForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await replayTestCase();
   });
 
   els.jsonImportForm.addEventListener("submit", (event) => {
@@ -424,7 +490,13 @@ function bindEvents() {
 
     const testCaseDetail = event.target.closest("[data-test-case-detail]");
     if (testCaseDetail) {
-      showTestCaseDetail(Number(testCaseDetail.dataset.testCaseDetail));
+      viewTestCaseDocuments(Number(testCaseDetail.dataset.testCaseDetail));
+      return;
+    }
+
+    const testCaseReplay = event.target.closest("[data-test-case-replay]");
+    if (testCaseReplay) {
+      openReplayTestCaseDialog(Number(testCaseReplay.dataset.testCaseReplay));
       return;
     }
 
@@ -454,6 +526,46 @@ function bindEvents() {
     if (testCaseCancelTitle) {
       state.editingTestCaseTitleId = null;
       renderTestCases();
+      return;
+    }
+
+    const testCaseEditStatus = event.target.closest("[data-test-case-edit-status]");
+    if (testCaseEditStatus) {
+      state.editingTestCaseStatusId = Number(testCaseEditStatus.dataset.testCaseEditStatus);
+      renderTestCases();
+      document.querySelector(`[data-test-case-status-input="${cssAttr(state.editingTestCaseStatusId)}"]`)?.focus();
+      return;
+    }
+
+    const testCaseSaveStatus = event.target.closest("[data-test-case-save-status]");
+    if (testCaseSaveStatus) {
+      updateTestCaseStatus(Number(testCaseSaveStatus.dataset.testCaseSaveStatus));
+      return;
+    }
+
+    const testCaseCancelStatus = event.target.closest("[data-test-case-cancel-status]");
+    if (testCaseCancelStatus) {
+      state.editingTestCaseStatusId = null;
+      renderTestCases();
+      return;
+    }
+
+    const documentEdit = event.target.closest("[data-document-edit]");
+    if (documentEdit) {
+      beginDocumentFieldEdit(documentEdit);
+      return;
+    }
+
+    const documentSave = event.target.closest("[data-document-save]");
+    if (documentSave) {
+      saveDocumentFieldEdit(documentSave);
+      return;
+    }
+
+    const documentCancel = event.target.closest("[data-document-cancel]");
+    if (documentCancel) {
+      state.documentEditingCell = null;
+      renderDocumentPages();
       return;
     }
 
@@ -540,6 +652,8 @@ async function loadConfig() {
     state.documentQueryPath = payload.documentQueryPath || state.documentQueryPath;
     state.testCasePageListPath = payload.testCasePageListPath || state.testCasePageListPath;
     state.testCasePageInfoPath = payload.testCasePageInfoPath || state.testCasePageInfoPath;
+    state.testCaseValidateResultPath = payload.testCaseValidateResultPath || state.testCaseValidateResultPath;
+    state.testCaseReplayPath = payload.testCaseReplayPath || state.testCaseReplayPath;
     applyConfig(payload.config || {});
   } catch (error) {
     showToast(`配置读取失败：${error.message}`);
@@ -568,41 +682,58 @@ async function ensureDocumentLabels() {
 function applyConfig(config, options = {}) {
   state.config = { ...state.config, ...config };
   renderCompanyOptions();
-  setEnvironment(state.config.environment || "local");
+  setEnvironment(state.config.environment || "auto");
   if (options.resetCompany !== false) {
     setCompanyForActiveModule(defaultCompanyForModule(state.activeModule));
   }
 }
 
 function setEnvironment(value) {
-  state.config.environment = value;
+  state.config.environment = state.environments[value] ? value : "auto";
   document.querySelectorAll("input[name='environment']").forEach((input) => {
-    input.checked = input.value === value;
+    input.checked = input.value === state.config.environment;
     input.closest(".segment").classList.toggle("active", input.checked);
   });
 
-  const env = state.environments[value] || {};
-  const baseUrl = env.baseUrl || "";
-  els.baseUrlText.textContent = baseUrl;
+  els.baseUrlText.textContent = environmentBaseUrl();
   updateRequestText();
 }
 
 function getSelectedEnvironment() {
   const selected = document.querySelector("input[name='environment']:checked");
-  return selected ? selected.value : "local";
+  return selected ? selected.value : "auto";
 }
 
 function updateEnvSummary() {
-  const env = state.environments[state.config.environment] || {};
-  const baseUrl = state.activeModule === "company-config" ? state.companyConfigBaseUrl : env.baseUrl || "";
+  const environment = getSelectedEnvironment();
+  const baseUrl = environmentBaseUrl(environment);
   const path = state.activeModule === "documents"
-    ? state.documentQueryPath
+    ? state.documentSource === "test-case" ? state.testCaseGetPath : state.documentQueryPath
     : state.activeModule === "test-cases"
       ? state.testCasePageListPath
     : state.activeModule === "company-config"
       ? "/cloudaccount/config/company/getByCompanyId"
-      : state.validatePath;
-  els.envSummary.textContent = `${env.label || state.config.environment} · ${baseUrl}${path.replace(/^\//, "")}`;
+      : currentValidatePath();
+  els.envSummary.textContent = `${environmentLabel(environment)} · ${baseUrl}${path.replace(/^\//, "")}`;
+}
+
+function environmentBaseUrl(environment = getSelectedEnvironment()) {
+  if (state.environments[environment]?.baseUrl) return state.environments[environment].baseUrl;
+  return window.location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:8080/"
+    : "https://pubcloud3.superboss.cc/";
+}
+
+function environmentLabel(environment) {
+  if (state.environments[environment]?.label) return state.environments[environment].label;
+  return "自动环境";
+}
+
+function currentValidatePath() {
+  if (state.validateSource !== "test-case") return state.validatePath;
+  return state.validateTestCase?.validationType === "replay"
+    ? state.testCaseReplayPath
+    : state.testCaseValidateResultPath;
 }
 
 function normalizeCompanies(companies) {
@@ -631,6 +762,13 @@ function renderCompanyOptions() {
   els.recordTestCaseCompanySelect.innerHTML = state.companies
     .map((company) => `<option value="${escapeAttr(company.companyId)}">${escapeHtml(company.name)}（${escapeHtml(company.companyId)}）</option>`)
     .join("");
+  const replayDefaultCompanyId = state.companies.some((company) => company.companyId === REPLAY_DEFAULT_COMPANY_ID)
+    ? REPLAY_DEFAULT_COMPANY_ID
+    : state.companies[0]?.companyId || "";
+  els.replayTestCaseCompanySelect.innerHTML = state.companies
+    .map((company) => `<option value="${escapeAttr(company.companyId)}"${company.companyId === replayDefaultCompanyId ? " selected" : ""}>${escapeHtml(company.name)}（${escapeHtml(company.companyId)}）</option>`)
+    .join("");
+  els.replayTestCaseCompanySelect.value = replayDefaultCompanyId;
 }
 
 function defaultCompanyForModule(module) {
@@ -670,6 +808,7 @@ function updateRequestText() {
   const company = selectedCompany();
   els.companyHint.textContent = company.companyId ? `companyId=${company.companyId}` : "请选择公司";
   els.uploadPathText.textContent = `POST ${state.validatePath} · companyId=${company.companyId || "-"}`;
+  els.testCaseValidatePathText.textContent = `POST ${state.testCaseValidateResultPath} · companyId=${company.companyId || "-"}`;
   els.documentQueryPathText.textContent = `GET ${state.documentQueryPath}?platformOrderNo=...&companyId=${company.companyId || "-"}`;
   els.companyConfigCompanyHint.textContent = company.companyId ? `companyId=${company.companyId}` : "请选择公司";
 }
@@ -681,7 +820,7 @@ async function loadCompanyConfig() {
   els.companyConfigLoading.classList.remove("hidden");
   els.saveCompanyConfigButton.disabled = true;
   try {
-    const params = new URLSearchParams({ companyId });
+    const params = new URLSearchParams({ companyId, environment: getSelectedEnvironment() });
     const response = await fetch(`/api/company-config?${params.toString()}`);
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
@@ -766,7 +905,7 @@ function companyConfigFormPayload() {
     throw new Error("请选择公司");
   }
   // 以核销配置页顶部下拉框的当前值为准，不使用其他菜单的公司选择状态。
-  const payload = { companyId };
+  const payload = { companyId, environment: getSelectedEnvironment() };
   for (const field of COMPANY_CONFIG_FIELDS) {
     const inputs = els.companyConfigFields.querySelectorAll(`[data-company-config-field="${cssAttr(field.key)}"]`);
     let value;
@@ -842,6 +981,158 @@ async function saveConfig() {
   }
 }
 
+function setValidationMode(mode, options = {}) {
+  state.validationMode = mode === "test-case" ? "test-case" : "excel";
+  document.querySelectorAll("[data-validation-mode]").forEach((button) => {
+    const active = button.dataset.validationMode === state.validationMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-validation-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.validationPanel !== state.validationMode);
+  });
+
+  if (state.validationMode === "test-case") {
+    setValidateSource("test-case", { validationType: "validate-result" });
+    if (options.load !== false) loadValidationTestCases();
+  } else {
+    setValidateSource("excel");
+  }
+  updateValidationModeUi();
+}
+
+function updateValidationModeUi() {
+  if (state.activeModule !== "validate") return;
+  els.configSubtitle.textContent = state.validationMode === "test-case"
+    ? "选择环境、公司和已录制的测试用例，校验当前运行结果。"
+    : "选择环境和公司，上传预期结果 Excel。";
+  updateRequestText();
+}
+
+async function loadValidationTestCases() {
+  const companyId = selectedCompanyId();
+  const environment = getSelectedEnvironment();
+  const requestKey = `${environment}:${companyId}`;
+  state.validationTestCases = [];
+  state.validationTestCasesCompanyId = companyId;
+  els.validationTestCaseSelect.disabled = true;
+  els.validateTestCaseButton.disabled = true;
+  els.validationTestCaseSelect.innerHTML = '<option value="">正在加载测试用例...</option>';
+  setInlineStatus(els.validateTestCaseStatus, "正在加载...");
+
+  try {
+    const response = await fetch("/api/test-cases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment,
+        companyId,
+        pageNo: 1,
+        pageSize: 500,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      const statuses = Object.values(proxyPayload.targetStatus || {}).join("/");
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${statuses || response.status}`);
+    }
+    if (`${getSelectedEnvironment()}:${selectedCompanyId()}` !== requestKey || state.validationMode !== "test-case") return;
+
+    const records = unwrapTestCaseResponse(proxyPayload.response?.list, "用例列表");
+    if (!Array.isArray(records)) {
+      throw new Error("用例列表接口返回的 data 不是数组");
+    }
+    state.validationTestCases = records;
+    els.validationTestCaseSelect.innerHTML = [
+      '<option value="">请选择测试用例</option>',
+      ...records.map((record) => `<option value="${escapeAttr(record.id)}">#${escapeHtml(numberText(record.id))} · ${escapeHtml(displayValue(record.title) || "未命名用例")} · ${escapeHtml(displayValue(record.platformOrderNo) || "-")}</option>`),
+    ].join("");
+    els.validationTestCaseSelect.disabled = false;
+    setInlineStatus(
+      els.validateTestCaseStatus,
+      records.length ? `已加载 ${records.length} 条用例` : "当前公司暂无测试用例",
+      records.length ? "success" : "",
+    );
+  } catch (error) {
+    if (`${getSelectedEnvironment()}:${selectedCompanyId()}` !== requestKey || state.validationMode !== "test-case") return;
+    els.validationTestCaseSelect.innerHTML = '<option value="">测试用例加载失败</option>';
+    setInlineStatus(els.validateTestCaseStatus, error.message, "error");
+    showToast(`用例列表加载失败：${error.message}`);
+  }
+}
+
+function updateValidationTestCaseSelection() {
+  const id = Number(els.validationTestCaseSelect.value);
+  const record = state.validationTestCases.find((item) => Number(item.id) === id);
+  els.validateTestCaseButton.disabled = !record;
+  if (!record) {
+    setValidateSource("test-case", { validationType: "validate-result" });
+    return;
+  }
+  const company = selectedCompany();
+  setValidateSource("test-case", {
+    ...record,
+    validationType: "validate-result",
+    validationCompanyId: company.companyId,
+    validationCompanyName: company.name,
+  });
+}
+
+async function validateTestCaseResult() {
+  const id = Number(els.validationTestCaseSelect.value);
+  const record = state.validationTestCases.find((item) => Number(item.id) === id);
+  if (!record) {
+    showToast("请选择测试用例");
+    els.validationTestCaseSelect.focus();
+    return;
+  }
+
+  const company = selectedCompany();
+  els.validateTestCaseButton.disabled = true;
+  setInlineStatus(els.validateTestCaseStatus, "正在校验用例...");
+  setRequestState("running", "用例校验中");
+  try {
+    const response = await fetch("/api/test-case-validate-result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId: company.companyId,
+        id,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+
+    const unwrapped = unwrapValidateResponse(proxyPayload.response);
+    if (!unwrapped.data) {
+      throw new Error(unwrapped.error || "用例校验接口返回中未找到 data.sheetResultMap");
+    }
+    setValidateSource("test-case", {
+      ...record,
+      validationType: "validate-result",
+      validationCompanyId: company.companyId,
+      validationCompanyName: company.name,
+    });
+    acceptValidateResponse(proxyPayload.response, unwrapped);
+    switchTab("overview");
+    setRequestState(unwrapped.error ? "error" : "success", unwrapped.error ? "用例校验异常" : "用例校验完成");
+    setInlineStatus(els.validateTestCaseStatus, `${state.sheetEntries.length} 个 sheet`, "success");
+    els.downloadJsonButton.disabled = false;
+    showToast(unwrapped.error || `测试用例 #${id} 校验完成`);
+  } catch (error) {
+    setRequestState("error", "用例校验失败");
+    setInlineStatus(els.validateTestCaseStatus, error.message, "error");
+    showToast(`用例校验失败：${error.message}`);
+  } finally {
+    const selectedId = Number(els.validationTestCaseSelect.value);
+    els.validateTestCaseButton.disabled = els.validationTestCaseSelect.disabled
+      || !state.validationTestCases.some((item) => Number(item.id) === selectedId);
+  }
+}
+
 async function validateExcel() {
   const file = els.fileInput.files[0];
   if (!file) {
@@ -849,6 +1140,9 @@ async function validateExcel() {
     return;
   }
 
+  const previousSource = state.validateSource;
+  const previousTestCase = state.validateTestCase;
+  setValidateSource("excel");
   setRequestState("running", "校验中");
   els.validateButton.disabled = true;
   setInlineStatus(els.uploadStatus, "正在上传并校验...");
@@ -881,6 +1175,7 @@ async function validateExcel() {
     switchTab("overview");
     showToast(unwrapped.error || "校验结果已更新");
   } catch (error) {
+    setValidateSource(previousSource, previousTestCase);
     setRequestState("error", "校验失败");
     setInlineStatus(els.uploadStatus, error.message, "error");
     showToast(`校验失败：${error.message}`);
@@ -923,6 +1218,7 @@ async function queryDocumentByPlatformOrderNo() {
 
     state.documentPlatformOrderNo = platformOrderNo;
     await ensureDocumentLabels();
+    setDocumentSource("live");
     acceptDocumentResponse(proxyPayload.response, unwrapped);
     setRequestState(unwrapped.error ? "error" : "success", unwrapped.error ? "接口异常" : "查询完成");
     setInlineStatus(els.documentQueryStatus, `HTTP ${proxyPayload.targetStatus} · ${totalDocumentRecordCount()} 条记录`, "success");
@@ -942,14 +1238,95 @@ function openRecordTestCaseDialog() {
   const defaultCompanyId = defaultCompanyForModule("test-cases");
   els.recordTestCaseCompanySelect.value = defaultCompanyId;
   els.recordTestCasePlatformOrderInput.value = "";
+  els.recordTestCaseTitleInput.value = "";
   setInlineStatus(els.recordTestCaseStatus, "");
   els.recordTestCaseDialog.showModal();
   window.requestAnimationFrame(() => els.recordTestCasePlatformOrderInput.focus());
 }
 
+function openReplayTestCaseDialog(id) {
+  const record = state.testCases.find((item) => Number(item.id) === id);
+  if (!record || !Number.isInteger(id) || id < 1) return;
+
+  state.replayTestCaseRecord = record;
+  els.replayTestCaseCompanySelect.value = REPLAY_DEFAULT_COMPANY_ID;
+  if (!els.replayTestCaseCompanySelect.value) {
+    els.replayTestCaseCompanySelect.value = defaultCompanyForModule("test-cases");
+  }
+  els.replayTestCaseSummary.textContent = `测试用例 #${id} · ${displayValue(record.title) || "未命名用例"} · 平台订单号 ${displayValue(record.platformOrderNo) || "-"}`;
+  setInlineStatus(els.replayTestCaseStatus, "");
+  els.replayTestCaseDialog.showModal();
+  window.requestAnimationFrame(() => els.replayTestCaseCompanySelect.focus());
+}
+
+async function replayTestCase() {
+  const record = state.replayTestCaseRecord;
+  const id = Number(record?.id);
+  const companyId = String(els.replayTestCaseCompanySelect.value || "").trim();
+  if (!record || !Number.isInteger(id) || id < 1) {
+    setInlineStatus(els.replayTestCaseStatus, "未找到需要回放的测试用例", "error");
+    return;
+  }
+  if (!companyId) {
+    setInlineStatus(els.replayTestCaseStatus, "请选择回放公司", "error");
+    els.replayTestCaseCompanySelect.focus();
+    return;
+  }
+
+  const company = state.companies.find((item) => item.companyId === companyId) || { name: "未命名公司", companyId };
+  els.replayTestCaseButton.disabled = true;
+  setInlineStatus(els.replayTestCaseStatus, "正在回放，请稍候...");
+  setRequestState("running", "回放中");
+  try {
+    const response = await fetch("/api/test-case-replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId,
+        id,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+
+    const unwrapped = unwrapValidateResponse(proxyPayload.response);
+    if (!unwrapped.data) {
+      throw new Error(unwrapped.error || "回放接口返回中未找到 data.sheetResultMap");
+    }
+
+    const replayMeta = {
+      ...record,
+      validationType: "replay",
+      replayCompanyId: companyId,
+      replayCompanyName: company.name,
+    };
+    setValidationMode("test-case", { load: false });
+    setValidateSource("test-case", replayMeta);
+    acceptValidateResponse(proxyPayload.response, unwrapped);
+    els.replayTestCaseDialog.close();
+    switchModule("validate");
+    setCompanyForActiveModule(companyId);
+    loadValidationTestCases();
+    switchTab("overview");
+    setRequestState(unwrapped.error ? "error" : "success", unwrapped.error ? "回放异常" : "回放完成");
+    els.downloadJsonButton.disabled = false;
+    showToast(unwrapped.error || `测试用例 #${id} 回放完成`);
+  } catch (error) {
+    setRequestState("error", "回放失败");
+    setInlineStatus(els.replayTestCaseStatus, error.message, "error");
+    showToast(`回放失败：${error.message}`);
+  } finally {
+    els.replayTestCaseButton.disabled = false;
+  }
+}
+
 async function recordTestCase() {
   const companyId = String(els.recordTestCaseCompanySelect.value || "").trim();
   const platformOrderNo = els.recordTestCasePlatformOrderInput.value.trim();
+  const title = els.recordTestCaseTitleInput.value.trim();
   if (!companyId) {
     setInlineStatus(els.recordTestCaseStatus, "请选择公司", "error");
     return;
@@ -970,6 +1347,7 @@ async function recordTestCase() {
         environment: getSelectedEnvironment(),
         companyId,
         platformOrderNo,
+        title: title || undefined,
       }),
     });
     const proxyPayload = await response.json();
@@ -1076,9 +1454,11 @@ function unwrapTestCaseResponse(response, name) {
 
 function renderTestCases() {
   const records = state.testCases || [];
-  els.testCaseTableBody.innerHTML = records.map((record) => {
+  const firstRowNumber = (state.testCasePageInfo.pageNo - 1) * state.testCasePageInfo.pageSize + 1;
+  els.testCaseTableBody.innerHTML = records.map((record, index) => {
     const status = testCaseStatus(record.status);
     const isEditingTitle = Number(record.id) === state.editingTestCaseTitleId;
+    const isEditingStatus = Number(record.id) === state.editingTestCaseStatusId;
     const titleCell = isEditingTitle
       ? `<div class="test-case-title-editor">
           <input data-test-case-title-input="${escapeAttr(record.id)}" type="text" value="${escapeAttr(displayValue(record.title))}" aria-label="用例标题" />
@@ -1089,15 +1469,29 @@ function renderTestCases() {
           <span>${escapeHtml(displayValue(record.title) || "-")}</span>
           <button class="test-case-title-edit" type="button" data-test-case-edit-title="${escapeAttr(record.id)}">编辑</button>
         </div>`;
+    const statusCell = isEditingStatus
+      ? `<div class="test-case-status-editor">
+          <select data-test-case-status-input="${escapeAttr(record.id)}" aria-label="用例状态">
+            ${renderTestCaseStatusOptions(record.status)}
+          </select>
+          <button class="test-case-title-save" type="button" data-test-case-save-status="${escapeAttr(record.id)}">保存</button>
+          <button class="test-case-title-cancel" type="button" data-test-case-cancel-status="${escapeAttr(record.id)}">取消</button>
+        </div>`
+      : `<div class="test-case-status-cell">
+          <span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span>
+          <button class="test-case-title-edit" type="button" data-test-case-edit-status="${escapeAttr(record.id)}">编辑</button>
+        </div>`;
     return `<tr>
+      <td class="number-cell">${numberText(firstRowNumber + index)}</td>
       <td class="number-cell">${numberText(record.id)}</td>
       <td>${titleCell}</td>
       <td class="mono-cell">${escapeHtml(displayValue(record.platformOrderNo) || "-")}</td>
-      <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
+      <td>${statusCell}</td>
       <td class="number-cell">${escapeHtml(formatDateTime(record.createdAt))}</td>
       <td class="number-cell">${escapeHtml(formatDateTime(record.updatedAt))}</td>
       <td class="test-case-actions">
         <button class="test-case-action" type="button" data-test-case-detail="${escapeAttr(record.id)}">查看</button>
+        <button class="test-case-action replay" type="button" data-test-case-replay="${escapeAttr(record.id)}">回放</button>
         <button class="test-case-action danger" type="button" data-test-case-delete="${escapeAttr(record.id)}">删除</button>
       </td>
     </tr>`;
@@ -1109,6 +1503,15 @@ function renderTestCases() {
     els.testCaseEmpty.textContent = state.testCasesLoaded ? "没有符合条件的测试用例。" : "点击查询获取测试用例。";
   }
   renderTestCasePagination();
+}
+
+function renderTestCaseStatusOptions(value) {
+  const selected = Number(value);
+  return [
+    [0, "待处理"],
+    [1, "已完成"],
+    [2, "作废"],
+  ].map(([status, label]) => `<option value="${status}"${status === selected ? " selected" : ""}>${label}</option>`).join("");
 }
 
 function testCaseStatus(value) {
@@ -1142,14 +1545,115 @@ function renderTestCasePagination() {
     <button type="button" ${pageNo >= pageCount ? "disabled" : ""} data-test-case-page="${pageNo + 1}" aria-label="下一页">›</button>`;
 }
 
-function showTestCaseDetail(id) {
-  const record = state.testCases.find((item) => Number(item.id) === id);
-  if (!record) return;
-  els.testCaseDetailSummary.textContent = `用例详情：${displayValue(record.title) || `#${id}`}`;
-  els.testCaseDetailContent.textContent = JSON.stringify(record, null, 2);
-  els.testCaseDetail.classList.remove("hidden");
-  els.testCaseDetail.open = true;
-  els.testCaseDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+async function viewTestCaseDocuments(id) {
+  const listRecord = state.testCases.find((item) => Number(item.id) === id);
+  if (!listRecord) return;
+  setRequestState("running", "读取用例中");
+  try {
+    const response = await fetch("/api/test-case-get", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId: selectedCompanyId(),
+        id,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+    const record = unwrapTestCaseResponse(proxyPayload.response, "用例详情");
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      throw new Error("用例详情数据格式不正确");
+    }
+
+    const documentResult = testCaseRecordToDocumentResult(record);
+    state.documentPlatformOrderNo = displayValue(record.platformOrderNo);
+    await ensureDocumentLabels();
+    setDocumentSource("test-case", record);
+    acceptDocumentResponse({ data: documentResult, testCase: record }, { data: documentResult, error: "" });
+    switchModule("documents");
+    setCompanyForActiveModule(String(record.companyId || selectedCompanyId()));
+    switchTab("doc-overview");
+    setRequestState("success", "用例已加载");
+    showToast(`已打开用例 #${id} 的单据快照`);
+  } catch (error) {
+    setRequestState("error", "读取失败");
+    showToast(`用例详情读取失败：${error.message}`);
+  }
+}
+
+function testCaseRecordToDocumentResult(record) {
+  return {
+    originalOrder: parseTestCaseSnapshot(record.originalOrder, {}),
+    originalAfterSale: parseTestCaseSnapshot(record.originalAfterSale, {}),
+    standardFundBillList: parseTestCaseSnapshot(record.standardFundBill, []),
+    orderStream: parseTestCaseSnapshot(record.orderStream, {}),
+    arReconciliationList: parseTestCaseSnapshot(record.arReconciliation, []),
+    manualVerifyRecordList: parseTestCaseSnapshot(record.manualVerifyRecord, []),
+    arAdjustmentRecordList: parseTestCaseSnapshot(record.arAdjustmentRecord, []),
+    issuedBalanceProcessList: parseTestCaseSnapshot(record.issuedBalanceProcess, []),
+    afterSalesExceptionList: parseTestCaseSnapshot(record.afterSalesException, []),
+    afterSalesExceptionDetailList: parseTestCaseSnapshot(record.afterSalesExceptionDetail, []),
+    refundOnlyTrackingList: parseTestCaseSnapshot(record.refundOnlyTracking, []),
+    issuedBalanceDetailList: parseTestCaseSnapshot(record.issuedBalanceDetail, []),
+  };
+}
+
+function parseTestCaseSnapshot(value, fallback) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed === null ? fallback : parsed;
+  } catch (error) {
+    throw new Error(`用例快照 JSON 解析失败：${error.message}`);
+  }
+}
+
+function setDocumentSource(source, testCase = null) {
+  state.documentSource = source === "test-case" ? "test-case" : "live";
+  state.documentTestCase = state.documentSource === "test-case" ? testCase : null;
+  state.documentEditingCell = null;
+  document.body.dataset.documentSource = state.documentSource;
+  updateDocumentSourceUi();
+}
+
+function setValidateSource(source, testCase = null) {
+  state.validateSource = source === "test-case" ? "test-case" : "excel";
+  state.validateTestCase = state.validateSource === "test-case" ? testCase : null;
+  document.body.dataset.validateSource = state.validateSource;
+  updateValidateSourceUi();
+}
+
+function updateValidateSourceUi() {
+  if (state.activeModule !== "validate") return;
+  const fromTestCase = state.validateSource === "test-case";
+  const isReplay = state.validateTestCase?.validationType === "replay";
+  document.querySelector(".brand-mark").textContent = fromTestCase ? "例" : "验";
+  document.querySelector(".brand-title").textContent = fromTestCase
+    ? isReplay ? "测试用例回放校验" : "测试用例运行结果校验"
+    : "导入运行结果校验";
+  updateEnvSummary();
+}
+
+function validateTestCaseSourceText() {
+  const record = state.validateTestCase;
+  if (state.validateSource !== "test-case" || !record?.id) return "";
+  const isReplay = record.validationType === "replay";
+  const companyName = displayValue(isReplay ? record.replayCompanyName : record.validationCompanyName) || "未命名公司";
+  const companyId = displayValue(isReplay ? record.replayCompanyId : record.validationCompanyId) || "-";
+  const actionLabel = isReplay ? "回放公司" : "校验公司";
+  return `测试用例 #${record.id} · ${displayValue(record.title) || "未命名用例"} · ${actionLabel} ${companyName}（${companyId}）`;
+}
+
+function updateDocumentSourceUi() {
+  if (state.activeModule !== "documents") return;
+  const fromTestCase = state.documentSource === "test-case";
+  document.querySelector(".brand-mark").textContent = fromTestCase ? "例" : "单";
+  document.querySelector(".brand-title").textContent = fromTestCase ? "测试用例单据查看" : "导入运行结果单据查看";
+  updateEnvSummary();
 }
 
 async function updateTestCaseTitle(id) {
@@ -1186,6 +1690,43 @@ async function updateTestCaseTitle(id) {
     showToast("用例标题已更新");
   } catch (error) {
     showToast(`修改失败：${error.message}`);
+  }
+}
+
+async function updateTestCaseStatus(id) {
+  const statusInput = document.querySelector(`[data-test-case-status-input="${cssAttr(id)}"]`);
+  const status = Number(statusInput?.value);
+  if (![0, 1, 2].includes(status)) {
+    showToast("请选择有效状态");
+    statusInput?.focus();
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/test-case-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        environment: getSelectedEnvironment(),
+        companyId: selectedCompanyId(),
+        id,
+        status,
+      }),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+    const updatedCount = unwrapTestCaseResponse(proxyPayload.response, "修改状态");
+    if (Number(updatedCount) < 1) {
+      throw new Error("未找到可修改的测试用例");
+    }
+
+    state.editingTestCaseStatusId = null;
+    await loadTestCases();
+    showToast("用例状态已更新");
+  } catch (error) {
+    showToast(`状态修改失败：${error.message}`);
   }
 }
 
@@ -1233,6 +1774,7 @@ function renderJsonInput() {
   }
   try {
     const payload = JSON.parse(text);
+    setValidationMode("excel", { load: false });
     const unwrapped = acceptValidateResponse(payload);
     els.downloadJsonButton.disabled = false;
     switchTab("overview");
@@ -1338,7 +1880,10 @@ function renderDocumentOverview() {
 
   els.documentOverviewEmpty.classList.add("hidden");
   els.documentOverviewContent.classList.remove("hidden");
-  els.documentOverviewSubtitle.textContent = `平台订单号 ${state.documentPlatformOrderNo || "-"} · ${totalDocumentRecordCount()} 条记录`;
+  const sourceText = state.documentSource === "test-case" && state.documentTestCase
+    ? `测试用例 #${state.documentTestCase.id} · ${displayValue(state.documentTestCase.title) || "未命名用例"}`
+    : "实时接口查询";
+  els.documentOverviewSubtitle.textContent = `${sourceText} · 平台订单号 ${state.documentPlatformOrderNo || "-"} · ${totalDocumentRecordCount()} 条记录`;
 
   const groupCounts = DOCUMENT_GROUPS.map((group) => ({
     group,
@@ -1389,6 +1934,7 @@ function renderDocumentPage(group) {
             ${renderPill(`总记录 ${numberText(total)}`)}
             ${renderPill(`当前展示 ${numberText(visibleTotal)}`)}
             ${renderPill(`平台订单号 ${displayValue(state.documentPlatformOrderNo) || "-"}`)}
+            ${state.documentSource === "test-case" && state.documentTestCase ? renderPill(`测试用例 #${state.documentTestCase.id} · 可编辑`, "red") : ""}
           </div>
         </div>
         <div class="toolbar">
@@ -1405,20 +1951,22 @@ function renderDocumentPage(group) {
         </div>
       </div>
 
-      ${state.documentResult ? renderDocumentCollections(collections, filter) : renderDocumentEmpty("暂无单据结果，请先按平台订单号查询。")}
+      ${state.documentResult ? renderDocumentCollections(collections, filter, group) : renderDocumentEmpty("暂无单据结果，请先按平台订单号查询。")}
     </section>
   `;
 }
 
-function renderDocumentCollections(collections, filter) {
+function renderDocumentCollections(collections, filter, group) {
   if (!collectionTotal(collections)) {
     return renderDocumentEmpty("当前平台订单号没有返回该单据数据。");
   }
-  return collections.map((collection) => renderDocumentCollection(collection, filter)).join("");
+  return collections.map((collection, collectionIndex) => renderDocumentCollection(collection, filter, group, collectionIndex)).join("");
 }
 
-function renderDocumentCollection(collection, filter) {
-  const records = filterDocumentRecords(collection.records, filter, collection.model);
+function renderDocumentCollection(collection, filter, group, collectionIndex) {
+  const records = collection.records
+    .map((record, recordIndex) => ({ record, recordIndex }))
+    .filter(({ record }) => filterDocumentRecords([record], filter, collection.model).length > 0);
   const fields = collectDocumentFields(collection.records);
   return `
     <section class="document-section">
@@ -1437,9 +1985,15 @@ function renderDocumentCollection(collection, filter) {
               </tr>
             </thead>
             <tbody>
-              ${records.map((record) => `
+              ${records.map(({ record, recordIndex }) => `
                 <tr>
-                  ${fields.map((field) => `<td>${renderDocumentValue(record[field])}</td>`).join("")}
+                  ${fields.map((field) => `<td>${renderDocumentFieldCell(record[field], {
+                    groupKey: group.key,
+                    tabId: group.tabId,
+                    collectionIndex,
+                    recordIndex,
+                    field,
+                  })}</td>`).join("")}
                 </tr>
               `).join("")}
             </tbody>
@@ -1448,6 +2002,157 @@ function renderDocumentCollection(collection, filter) {
       ` : renderDocumentEmpty("没有符合搜索条件的记录。")}
     </section>
   `;
+}
+
+function renderDocumentFieldCell(value, meta) {
+  if (state.documentSource !== "test-case") {
+    return renderDocumentValue(value);
+  }
+  const key = documentCellKey(meta);
+  if (documentCellKey(state.documentEditingCell) === key) {
+    return `<div class="document-field-editor">
+      <textarea data-document-editor-key="${escapeAttr(key)}" data-value-type="${escapeAttr(documentValueType(value))}" aria-label="编辑 ${escapeAttr(meta.field)}">${escapeHtml(documentEditorText(value))}</textarea>
+      <div class="document-field-editor-actions">
+        <button class="document-field-save" type="button" data-document-save
+          data-group-key="${escapeAttr(meta.groupKey)}" data-tab-id="${escapeAttr(meta.tabId)}"
+          data-collection-index="${meta.collectionIndex}" data-record-index="${meta.recordIndex}"
+          data-field="${escapeAttr(meta.field)}">保存</button>
+        <button class="document-field-cancel" type="button" data-document-cancel>取消</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="document-field-cell">
+    <div class="document-field-value">${renderDocumentValue(value)}</div>
+    <button class="document-field-edit" type="button" data-document-edit
+      data-group-key="${escapeAttr(meta.groupKey)}" data-tab-id="${escapeAttr(meta.tabId)}"
+      data-collection-index="${meta.collectionIndex}" data-record-index="${meta.recordIndex}"
+      data-field="${escapeAttr(meta.field)}">编辑</button>
+  </div>`;
+}
+
+function documentCellKey(meta) {
+  if (!meta) return "";
+  return [meta.groupKey, meta.collectionIndex, meta.recordIndex, meta.field].join("::");
+}
+
+function documentValueType(value) {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "object") return "object";
+  return typeof value;
+}
+
+function documentEditorText(value) {
+  if (value === null || value === undefined) return "";
+  return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+}
+
+function beginDocumentFieldEdit(button) {
+  if (state.documentSource !== "test-case") return;
+  state.documentEditingCell = documentEditMeta(button);
+  renderDocumentPages();
+  switchTab(state.documentEditingCell.tabId);
+  const editor = document.querySelector(`[data-document-editor-key="${cssAttr(documentCellKey(state.documentEditingCell))}"]`);
+  editor?.focus();
+  editor?.select();
+}
+
+async function saveDocumentFieldEdit(button) {
+  if (state.documentSource !== "test-case" || !state.documentTestCase) return;
+  const meta = documentEditMeta(button);
+  const key = documentCellKey(meta);
+  const editor = document.querySelector(`[data-document-editor-key="${cssAttr(key)}"]`);
+  if (!editor) return;
+
+  const group = DOCUMENT_GROUPS.find((item) => item.key === meta.groupKey);
+  const collection = group?.collections[meta.collectionIndex];
+  const records = collection ? normalizeRecords(valueAtPath(state.documentResult, collection.path)) : [];
+  const record = records[meta.recordIndex];
+  const snapshotField = TEST_CASE_DOCUMENT_FIELD_BY_RESULT_KEY[meta.groupKey];
+  if (!group || !collection || !record || !snapshotField) {
+    showToast("无法定位需要修改的单据字段");
+    return;
+  }
+
+  const oldValue = record[meta.field];
+  let nextValue;
+  try {
+    nextValue = parseDocumentEditorValue(editor.value, editor.dataset.valueType);
+  } catch (error) {
+    showToast(`字段值格式不正确：${error.message}`);
+    editor.focus();
+    return;
+  }
+
+  record[meta.field] = nextValue;
+  const snapshotJson = JSON.stringify(state.documentResult[meta.groupKey]);
+  button.disabled = true;
+  try {
+    const requestBody = {
+      environment: getSelectedEnvironment(),
+      companyId: String(state.documentTestCase.companyId),
+      id: Number(state.documentTestCase.id),
+      [snapshotField]: snapshotJson,
+    };
+    const response = await fetch("/api/test-case-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+    const proxyPayload = await response.json();
+    if (!response.ok || !proxyPayload.ok) {
+      throw new Error(proxyPayload.message || `目标接口 HTTP ${proxyPayload.targetStatus || response.status}`);
+    }
+    const updatedCount = unwrapTestCaseResponse(proxyPayload.response, "修改单据字段");
+    if (Number(updatedCount) < 1) {
+      throw new Error("未找到可修改的测试用例");
+    }
+
+    state.documentTestCase[snapshotField] = snapshotJson;
+    state.documentEditingCell = null;
+    renderDocumentPages();
+    switchTab(meta.tabId);
+    showToast(`${fieldLabel(meta.field, collection.model)} 已保存`);
+  } catch (error) {
+    record[meta.field] = oldValue;
+    button.disabled = false;
+    showToast(`保存失败：${error.message}`);
+  }
+}
+
+function documentEditMeta(element) {
+  return {
+    groupKey: element.dataset.groupKey,
+    tabId: element.dataset.tabId,
+    collectionIndex: Number(element.dataset.collectionIndex),
+    recordIndex: Number(element.dataset.recordIndex),
+    field: element.dataset.field,
+  };
+}
+
+function parseDocumentEditorValue(text, type) {
+  if (type === "object") {
+    return JSON.parse(text);
+  }
+  if (type === "number") {
+    const number = Number(text.trim());
+    if (!Number.isFinite(number)) throw new Error("请输入有效数字");
+    return number;
+  }
+  if (type === "boolean") {
+    const normalized = text.trim().toLowerCase();
+    if (normalized !== "true" && normalized !== "false") throw new Error("布尔值只能填写 true 或 false");
+    return normalized === "true";
+  }
+  if (type === "null") {
+    const normalized = text.trim();
+    if (!normalized) return null;
+    try {
+      return JSON.parse(normalized);
+    } catch (_) {
+      return text;
+    }
+  }
+  return text;
 }
 
 function renderDocumentHeader(field, model) {
@@ -1492,7 +2197,10 @@ function renderOverview() {
   els.overviewContent.classList.remove("hidden");
   els.focusFailedButton.disabled = false;
   const fileName = state.result.fileName || "未命名文件";
-  els.overviewSubtitle.textContent = `${fileName} · companyId=${displayValue(state.result.companyId)}`;
+  const sourceText = validateTestCaseSourceText();
+  els.overviewSubtitle.textContent = sourceText
+    ? `${sourceText} · ${fileName}`
+    : `${fileName} · companyId=${displayValue(state.result.companyId)}`;
 
   const sheets = state.sheetEntries;
   const issueSheets = sheets.filter(([, sheet]) => hasSheetIssue(sheet)).length;
@@ -1602,6 +2310,9 @@ function renderSheetPage(tabId, sheetName, sheet) {
         <h1>${escapeHtml(sheetName)}</h1>
         <div class="sheet-meta">
           <span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span>
+          ${state.validateSource === "test-case" && state.validateTestCase?.id
+            ? renderPill(`测试用例 #${state.validateTestCase.id} · ${state.validateTestCase.validationType === "replay" ? "回放结果" : "用例校验结果"}`, "red")
+            : ""}
           <span class="target-chip">表头行 ${numberText(sheet.headerRow)}</span>
           <span class="target-chip">数据起始行 ${numberText(sheet.dataStartRow)}</span>
           ${renderTargetChips(sheet)}
@@ -1613,7 +2324,7 @@ function renderSheetPage(tabId, sheetName, sheet) {
     </div>
 
     <div class="metric-grid">
-      ${metricCard("Excel 有效行", sheet.excelDataRowCount ?? sheet.rowCount, `读取行 ${numberText(sheet.rowCount)}`)}
+      ${metricCard(validationDataSourceText("有效行"), sheet.excelDataRowCount ?? sheet.rowCount, `读取行 ${numberText(sheet.rowCount)}`)}
       ${metricCard("数据库行", sheet.actualRowCount, "主目标表记录数")}
       ${metricCard("匹配行", sheet.matchedRowCount, rowPassRate(sheet))}
       ${metricCard("异常", sheetIssueScore(sheet), `差异 ${numberText(sheet.mismatchCount)} · 未匹配 ${numberText(sheet.missingActualRowCount)}`)}
@@ -1736,9 +2447,9 @@ function renderRowDetail(tabId, row, index) {
           <thead>
             <tr>
               <th>目标对象</th>
-              <th>Excel 表头</th>
+              <th>${validationDataSourceText("表头")}</th>
               <th>Java 字段</th>
-              <th>Excel 值</th>
+              <th>${validationDataSourceText("值")}</th>
               <th>数据库值</th>
               <th>说明</th>
               <th>状态</th>
@@ -1801,7 +2512,7 @@ function renderFieldRow(field) {
   return `
     <tr>
       <td>${escapeHtml(displayValue(field.targetName))}</td>
-      <td>${escapeHtml(displayValue(field.header))}</td>
+      <td>${escapeHtml(validationFieldHeader(field))}</td>
       <td class="mono-cell">${escapeHtml(displayValue(field.field))}</td>
       <td class="value ${field.matched ? "" : "diff"}">${escapeHtml(displayValue(field.excelValue))}</td>
       <td class="value ${field.matched ? "" : "diff"}">${escapeHtml(displayValue(field.databaseValue))}</td>
@@ -1809,6 +2520,37 @@ function renderFieldRow(field) {
       <td><span class="status-chip ${tone}">${field.matched ? "匹配" : "不一致"}</span></td>
     </tr>
   `;
+}
+
+function validationDataSourceLabel() {
+  return state.validateSource === "test-case" ? "用例" : "Excel";
+}
+
+function validationDataSourceText(suffix) {
+  const source = validationDataSourceLabel();
+  return `${source}${/^[A-Za-z]/.test(source) ? " " : ""}${suffix}`;
+}
+
+function validationFieldHeader(field) {
+  const header = displayValue(field.header);
+  if (!header) return "";
+
+  const javaField = displayValue(field.field) || header;
+  const label = conciseValidationFieldLabel(fieldLabel(javaField, displayValue(field.targetName)));
+  if (!label || normalizedFieldLabel(label) === normalizedFieldLabel(javaField)) {
+    return header;
+  }
+  return `${header} (${label})`;
+}
+
+function conciseValidationFieldLabel(label) {
+  const compact = compactLabel(label);
+  const punctuationIndex = compact.search(/[，,。；;：:]/);
+  return punctuationIndex > 0 ? compact.slice(0, punctuationIndex).trim() : compact;
+}
+
+function normalizedFieldLabel(value) {
+  return String(value || "").replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, "").toLowerCase();
 }
 
 function renderHeaderSection(sheet) {
@@ -2126,6 +2868,13 @@ function switchModule(module) {
       : module === "test-cases"
         ? "导入测试用例"
       : "导入运行结果校验";
+  if (module === "documents") {
+    updateDocumentSourceUi();
+  }
+  if (module === "validate") {
+    updateValidateSourceUi();
+    updateValidationModeUi();
+  }
   updateEnvSummary();
   renderModuleTabs();
 

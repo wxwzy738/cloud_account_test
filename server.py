@@ -25,12 +25,14 @@ VALIDATE_PATH = "/cloudaccount/importTestData/validateExcel"
 DOCUMENT_QUERY_PATH = "/cloudaccount/importTestData/platformOrderNo"
 TEST_CASE_PAGE_LIST_PATH = "/cloudaccount/testCase/pageList"
 TEST_CASE_PAGE_INFO_PATH = "/cloudaccount/testCase/pageInfo"
+TEST_CASE_GET_PATH = "/cloudaccount/testCase/getById"
+TEST_CASE_VALIDATE_RESULT_PATH = "/cloudaccount/testCase/validateResult"
+TEST_CASE_REPLAY_PATH = "/cloudaccount/testCase/replay"
 TEST_CASE_RECORD_PATH = "/cloudaccount/testCase/record"
 TEST_CASE_DELETE_PATH = "/cloudaccount/testCase/deleteById"
 TEST_CASE_UPDATE_PATH = "/cloudaccount/testCase/updateById"
 COMPANY_CONFIG_GET_PATH = "/cloudaccount/config/company/getByCompanyId"
 COMPANY_CONFIG_SAVE_PATH = "/cloudaccount/config/company/insertOrUpdate"
-COMPANY_CONFIG_BASE_URL = "https://pubcloud3.superboss.cc/"
 OPENAPI_SCHEMA_URL = "https://pubcloud3.superboss.cc/v3/api-docs/cloud-account"
 MAX_UPLOAD_BYTES = 80 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 300
@@ -47,6 +49,8 @@ ENVIRONMENTS = {
         "baseUrl": "https://pubcloud3.superboss.cc/",
     },
 }
+AUTO_ENVIRONMENT = "auto"
+LOCAL_REQUEST_HOST = "127.0.0.1"
 
 COMPANIES = [
     {
@@ -61,14 +65,14 @@ COMPANIES = [
 
 COMPANY_IDS = {company["companyId"] for company in COMPANIES}
 DEFAULT_COMPANY_BY_MODULE = {
-    "validate": "10438",
+    "validate": "37041",
     "documents": "37041",
     "company-config": "37041",
     "test-cases": "37041",
 }
 
 DEFAULT_CONFIG = {
-    "environment": "local",
+    "environment": AUTO_ENVIRONMENT,
 }
 
 SCHEMA_SOURCE_FILES = [
@@ -85,6 +89,7 @@ SCHEMA_SOURCE_FILES = [
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/erpsync/ErpReissueOrRefundDO.java",
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/aftersales/YzRefundOnlyTrackingDO.java",
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/aftersales/YzAfterSalesExceptionDO.java",
+    KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/aftersales/YzAfterSalesExceptionDetailDO.java",
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/standardfund/YzStandardFundBillFlowInfoDO.java",
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/adjustment/YzArAdjustmentRecordDO.java",
     KMERP_ROOT / "cloud-account-core/src/main/java/com/raycloud/cloudaccount/core/base/domain/verification/YzManualVerifyRecordDO.java",
@@ -167,14 +172,14 @@ def load_config() -> dict[str, Any]:
         return dict(DEFAULT_CONFIG)
 
     config = dict(DEFAULT_CONFIG)
-    if data.get("environment") in ENVIRONMENTS:
+    if data.get("environment") in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
         config["environment"] = data["environment"]
     return config
 
 
 def save_config(config: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(DEFAULT_CONFIG)
-    if config.get("environment") in ENVIRONMENTS:
+    if config.get("environment") in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
         normalized["environment"] = config["environment"]
 
     CONFIG_FILE.write_text(
@@ -277,11 +282,17 @@ def normalize_company_id(value: Any) -> str:
 
 
 def clean_java_doc(lines: list[str]) -> str:
-    text = " ".join(
-        line.strip().lstrip("*").strip()
-        for line in lines
-        if line.strip() and line.strip() not in ("/**", "*/")
-    )
+    cleaned_lines: list[str] = []
+    for line in lines:
+        cleaned = line.strip()
+        if cleaned.startswith("/**"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("*/"):
+            cleaned = cleaned[:-2]
+        cleaned = cleaned.lstrip("*").strip()
+        if cleaned:
+            cleaned_lines.append(cleaned)
+    text = " ".join(cleaned_lines)
     return " ".join(text.split())
 
 
@@ -573,6 +584,16 @@ def extract_schema_labels() -> dict[str, Any]:
 class ValidateViewerHandler(BaseHTTPRequestHandler):
     server_version = "CloudAccountValidateViewer/1.0"
 
+    def target_base_url(self, environment: Any) -> str:
+        """Return the explicitly selected environment, or infer it from the page host."""
+        if environment in ENVIRONMENTS:
+            return ENVIRONMENTS[environment]["baseUrl"]
+
+        request_host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").lower()
+        if request_host == LOCAL_REQUEST_HOST:
+            return ENVIRONMENTS["local"]["baseUrl"]
+        return ENVIRONMENTS["gray3"]["baseUrl"]
+
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
 
@@ -590,6 +611,8 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
                     "documentQueryPath": DOCUMENT_QUERY_PATH,
                     "testCasePageListPath": TEST_CASE_PAGE_LIST_PATH,
                     "testCasePageInfoPath": TEST_CASE_PAGE_INFO_PATH,
+                    "testCaseValidateResultPath": TEST_CASE_VALIDATE_RESULT_PATH,
+                    "testCaseReplayPath": TEST_CASE_REPLAY_PATH,
                 }
             )
             return
@@ -617,6 +640,15 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/test-cases":
             self.proxy_test_case_query_request()
+            return
+        if path == "/api/test-case-get":
+            self.proxy_test_case_get_request()
+            return
+        if path == "/api/test-case-validate-result":
+            self.proxy_test_case_validate_result_request()
+            return
+        if path == "/api/test-case-replay":
+            self.proxy_test_case_replay_request()
             return
         if path == "/api/test-case-record":
             self.proxy_test_case_record_request()
@@ -691,7 +723,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
 
         environment = payload.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -725,7 +757,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
 
         config = load_config()
         environment = fields.get("environment") or config.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -737,7 +769,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
 
         save_config({"environment": environment})
 
-        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        base_url = self.target_base_url(environment)
         target_url = urljoin(base_url, VALIDATE_PATH.lstrip("/"))
         boundary, target_body = build_multipart(
             {"companyId": company_id},
@@ -802,7 +834,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
 
         config = load_config()
         environment = payload.get("environment") or config.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -814,7 +846,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
 
         save_config({"environment": environment})
 
-        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        base_url = self.target_base_url(environment)
         query_string = urlencode({"platformOrderNo": platform_order_no, "companyId": company_id})
         target_url = urljoin(base_url, DOCUMENT_QUERY_PATH.lstrip("/")) + "?" + query_string
         headers = {
@@ -865,7 +897,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
 
         config = load_config()
         environment = payload.pop("environment", None) or config.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -894,7 +926,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
         query_payload.setdefault("pageSize", page_size)
         save_config({"environment": environment})
 
-        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        base_url = self.target_base_url(environment)
         query_string = urlencode({"companyId": company_id})
         body = json_bytes(query_payload)
         headers = {
@@ -937,6 +969,51 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK if all(status < 500 for status in statuses.values()) else HTTPStatus.BAD_GATEWAY,
         )
 
+    def proxy_test_case_get_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            test_case_id = int(payload.get("id"))
+            if test_case_id < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "message": "用例编号必须为正整数"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = self.target_base_url(environment)
+        target_url = urljoin(base_url, TEST_CASE_GET_PATH.lstrip("/")) + "?" + urlencode(
+            {"companyId": company_id, "id": test_case_id}
+        )
+        request = Request(
+            target_url,
+            data=b"",
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Length": "0",
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        self.send_test_case_proxy_response(request, target_url)
+
     def proxy_test_case_record_request(self) -> None:
         try:
             payload = json.loads(self.read_body().decode("utf-8"))
@@ -948,10 +1025,11 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
         if not platform_order_no:
             self.send_json({"ok": False, "message": "请输入平台订单号"}, HTTPStatus.BAD_REQUEST)
             return
+        title = str(payload.get("title") or "").strip()
 
         config = load_config()
         environment = payload.get("environment") or config.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -962,10 +1040,11 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
 
         save_config({"environment": environment})
-        base_url = ENVIRONMENTS[environment]["baseUrl"]
-        target_url = urljoin(base_url, TEST_CASE_RECORD_PATH.lstrip("/")) + "?" + urlencode(
-            {"companyId": company_id, "platformOrderNo": platform_order_no}
-        )
+        base_url = self.target_base_url(environment)
+        query_params = {"companyId": company_id, "platformOrderNo": platform_order_no}
+        if title:
+            query_params["title"] = title
+        target_url = urljoin(base_url, TEST_CASE_RECORD_PATH.lstrip("/")) + "?" + urlencode(query_params)
         request = Request(
             target_url,
             data=b"",
@@ -1004,6 +1083,96 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
         )
 
+    def proxy_test_case_replay_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            test_case_id = int(payload.get("id"))
+            if test_case_id < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "message": "用例编号必须为正整数"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = self.target_base_url(environment)
+        target_url = urljoin(base_url, TEST_CASE_REPLAY_PATH.lstrip("/")) + "?" + urlencode(
+            {"companyId": company_id, "id": test_case_id}
+        )
+        request = Request(
+            target_url,
+            data=b"",
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Length": "0",
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        self.send_test_case_proxy_response(request, target_url)
+
+    def proxy_test_case_validate_result_request(self) -> None:
+        try:
+            payload = json.loads(self.read_body().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            test_case_id = int(payload.get("id"))
+            if test_case_id < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            self.send_json({"ok": False, "message": "用例编号必须为正整数"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        config = load_config()
+        environment = payload.get("environment") or config.get("environment")
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            company_id = normalize_company_id(payload.get("companyId"))
+        except ValueError as exc:
+            self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = self.target_base_url(environment)
+        target_url = urljoin(base_url, TEST_CASE_VALIDATE_RESULT_PATH.lstrip("/")) + "?" + urlencode(
+            {"companyId": company_id, "id": test_case_id}
+        )
+        request = Request(
+            target_url,
+            data=b"",
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Content-Length": "0",
+                "User-Agent": self.server_version,
+                "Referer": base_url,
+            },
+            method="POST",
+        )
+        self.send_test_case_proxy_response(request, target_url)
+
     def proxy_test_case_delete_request(self) -> None:
         try:
             payload = json.loads(self.read_body().decode("utf-8"))
@@ -1021,7 +1190,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
 
         config = load_config()
         environment = payload.get("environment") or config.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -1032,7 +1201,7 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
 
         save_config({"environment": environment})
-        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        base_url = self.target_base_url(environment)
         target_url = urljoin(base_url, TEST_CASE_DELETE_PATH.lstrip("/")) + "?" + urlencode({"companyId": company_id})
         body = json_bytes({"id": test_case_id})
         request = Request(
@@ -1089,14 +1258,46 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "message": "用例编号必须为正整数"}, HTTPStatus.BAD_REQUEST)
             return
 
-        title = str(payload.get("title") or "").strip()
-        if not title:
-            self.send_json({"ok": False, "message": "用例标题不能为空"}, HTTPStatus.BAD_REQUEST)
+        allowed_fields = (
+            "title",
+            "originalOrder",
+            "originalAfterSale",
+            "standardFundBill",
+            "orderStream",
+            "arReconciliation",
+            "manualVerifyRecord",
+            "arAdjustmentRecord",
+            "issuedBalanceProcess",
+            "afterSalesException",
+            "afterSalesExceptionDetail",
+            "refundOnlyTracking",
+            "issuedBalanceDetail",
+            "status",
+        )
+        updates = {field: payload[field] for field in allowed_fields if field in payload and payload[field] is not None}
+        if len(updates) != 1:
+            self.send_json({"ok": False, "message": "每次只能修改一个用例字段"}, HTTPStatus.BAD_REQUEST)
+            return
+        if "title" in updates:
+            updates["title"] = str(updates["title"] or "").strip()
+            if not updates["title"]:
+                self.send_json({"ok": False, "message": "用例标题不能为空"}, HTTPStatus.BAD_REQUEST)
+                return
+        elif "status" in updates:
+            try:
+                updates["status"] = int(updates["status"])
+                if updates["status"] not in (0, 1, 2):
+                    raise ValueError
+            except (TypeError, ValueError):
+                self.send_json({"ok": False, "message": "用例状态只能是待处理、已完成或作废"}, HTTPStatus.BAD_REQUEST)
+                return
+        elif not isinstance(next(iter(updates.values())), str):
+            self.send_json({"ok": False, "message": "单据快照必须是 JSON 字符串"}, HTTPStatus.BAD_REQUEST)
             return
 
         config = load_config()
         environment = payload.get("environment") or config.get("environment")
-        if environment not in ENVIRONMENTS:
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
             self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
             return
 
@@ -1107,9 +1308,9 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             return
 
         save_config({"environment": environment})
-        base_url = ENVIRONMENTS[environment]["baseUrl"]
+        base_url = self.target_base_url(environment)
         target_url = urljoin(base_url, TEST_CASE_UPDATE_PATH.lstrip("/")) + "?" + urlencode({"companyId": company_id})
-        body = json_bytes({"id": test_case_id, "title": title})
+        body = json_bytes({"id": test_case_id, **updates})
         request = Request(
             target_url,
             data=body,
@@ -1149,6 +1350,34 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
         )
 
+    def send_test_case_proxy_response(self, request: Request, target_url: str) -> None:
+        try:
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                status = response.status
+                raw = response.read()
+                target_headers = dict(response.headers.items())
+        except HTTPError as exc:
+            status = exc.code
+            raw = exc.read()
+            target_headers = dict(exc.headers.items()) if exc.headers else {}
+        except URLError as exc:
+            self.send_json(
+                {"ok": False, "message": f"无法访问目标环境：{exc.reason}", "targetUrl": target_url},
+                HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json(
+            {
+                "ok": 200 <= status < 400,
+                "targetStatus": status,
+                "targetUrl": target_url,
+                "contentType": target_headers.get("Content-Type"),
+                "response": decode_target_response(raw),
+            },
+            HTTPStatus.OK if status < 500 else HTTPStatus.BAD_GATEWAY,
+        )
+
     def proxy_company_config_get_request(self, query: dict[str, list[str]]) -> None:
         try:
             company_id = normalize_company_id((query.get("companyId") or [""])[0])
@@ -1156,7 +1385,14 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
 
-        base_url = COMPANY_CONFIG_BASE_URL
+        config = load_config()
+        environment = (query.get("environment") or [None])[0] or config.get("environment")
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        save_config({"environment": environment})
+        base_url = self.target_base_url(environment)
         target_url = urljoin(base_url, COMPANY_CONFIG_GET_PATH.lstrip("/")) + "?" + urlencode({"companyId": company_id})
         request = Request(
             target_url,
@@ -1172,7 +1408,11 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "message": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
 
-        payload.pop("environment", None)
+        config = load_config()
+        environment = payload.pop("environment", None) or config.get("environment")
+        if environment not in (*ENVIRONMENTS, AUTO_ENVIRONMENT):
+            self.send_json({"ok": False, "message": "环境配置不正确"}, HTTPStatus.BAD_REQUEST)
+            return
 
         try:
             payload["companyId"] = int(normalize_company_id(payload.get("companyId")))
@@ -1184,7 +1424,8 @@ class ValidateViewerHandler(BaseHTTPRequestHandler):
         for field in ("id", "createdAt", "updatedAt", "isDeleted"):
             payload.pop(field, None)
 
-        base_url = COMPANY_CONFIG_BASE_URL
+        save_config({"environment": environment})
+        base_url = self.target_base_url(environment)
         target_url = urljoin(base_url, COMPANY_CONFIG_SAVE_PATH.lstrip("/"))
         body = json_bytes(payload)
         request = Request(

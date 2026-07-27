@@ -52,7 +52,7 @@ POST /cloudaccount/testCase/pageInfo?companyId=...
 
 访问环境会保存到本目录的 `config.json`，该文件已加入 `.gitignore`。公司通过页面下拉框选择：
 
-- 导入校验默认：咖啡测试3，`companyId=10438`
+- 导入校验默认：德赛集团，`companyId=37041`
 - 查看单据默认：德赛集团，`companyId=37041`
 - 核销配置默认：德赛集团，`companyId=37041`
 - 测试用例默认：德赛集团，`companyId=37041`

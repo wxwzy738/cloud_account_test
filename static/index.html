@@ -46,6 +46,7 @@
           <button class="tab" type="button" data-module="documents" data-tab="doc-arAdjustmentRecordList">应收手动调整</button>
           <button class="tab" type="button" data-module="documents" data-tab="doc-issuedBalanceProcessList">发出余额处理</button>
           <button class="tab" type="button" data-module="documents" data-tab="doc-afterSalesExceptionList">售后差异监控</button>
+          <button class="tab" type="button" data-module="documents" data-tab="doc-afterSalesExceptionDetailList">售后差异明细</button>
           <button class="tab" type="button" data-module="documents" data-tab="doc-refundOnlyTrackingList">仅退款追踪</button>
           <button class="tab" type="button" data-module="documents" data-tab="doc-issuedBalanceDetailList">发出余额明细</button>
           <button class="tab" type="button" data-module="test-cases" data-tab="test-cases">测试用例</button>
@@ -65,7 +66,11 @@
               <label class="field-label">访问环境</label>
               <div class="segmented" id="environmentOptions">
                 <label class="segment active">
-                  <input type="radio" name="environment" value="local" checked />
+                  <input type="radio" name="environment" value="auto" checked />
+                  <span>自动</span>
+                </label>
+                <label class="segment">
+                  <input type="radio" name="environment" value="local" />
                   <span>本地环境</span>
                 </label>
                 <label class="segment">
@@ -73,13 +78,13 @@
                   <span>灰度3环境</span>
                 </label>
               </div>
-              <div class="field-hint" id="baseUrlText">http://127.0.0.1:8080/</div>
+              <div class="field-hint" id="baseUrlText">根据页面访问地址自动选择</div>
             </div>
 
             <div class="field-block">
               <label class="field-label" for="companySelect">公司</label>
               <select id="companySelect"></select>
-              <div class="field-hint" id="companyHint">companyId=10438</div>
+              <div class="field-hint" id="companyHint">companyId=37041</div>
             </div>
 
             <div class="button-row">
@@ -89,15 +94,40 @@
           </form>
 
           <form class="upload-form" id="uploadForm" data-module-panel="validate">
-            <label class="upload-box" id="dropZone">
-              <input id="fileInput" name="file" type="file" accept=".xlsx,.xls" />
-              <span class="upload-icon">↑</span>
-              <span class="upload-title" id="fileNameText">选择 Excel 文件</span>
-              <span class="upload-meta" id="uploadPathText">POST /cloudaccount/importTestData/validateExcel</span>
-            </label>
-            <div class="button-row">
-              <button class="primary-button" id="validateButton" type="submit">开始校验</button>
-              <span class="inline-status" id="uploadStatus"></span>
+            <div class="validation-mode-switch" role="tablist" aria-label="校验方式">
+              <button class="validation-mode-button active" type="button" data-validation-mode="excel" role="tab" aria-selected="true">导入校验</button>
+              <button class="validation-mode-button" type="button" data-validation-mode="test-case" role="tab" aria-selected="false">用例校验</button>
+            </div>
+
+            <div class="validation-mode-panel" id="excelValidationPanel" data-validation-panel="excel">
+              <label class="upload-box" id="dropZone">
+                <input id="fileInput" name="file" type="file" accept=".xlsx,.xls" />
+                <span class="upload-icon">↑</span>
+                <span class="upload-title" id="fileNameText">选择 Excel 文件</span>
+                <span class="upload-meta" id="uploadPathText">POST /cloudaccount/importTestData/validateExcel</span>
+              </label>
+              <div class="button-row validation-submit-row">
+                <button class="primary-button" id="validateButton" type="submit">开始校验</button>
+                <span class="inline-status" id="uploadStatus"></span>
+              </div>
+            </div>
+
+            <div class="validation-mode-panel hidden" id="testCaseValidationPanel" data-validation-panel="test-case">
+              <div class="test-case-validation-box">
+                <div class="test-case-validation-icon">例</div>
+                <div>
+                  <div class="upload-title">选择测试用例</div>
+                  <div class="field-hint">按左侧当前公司加载已录制的测试用例。</div>
+                </div>
+                <select id="validationTestCaseSelect" aria-label="测试用例">
+                  <option value="">请选择测试用例</option>
+                </select>
+                <div class="upload-meta" id="testCaseValidatePathText">POST /cloudaccount/testCase/validateResult</div>
+              </div>
+              <div class="button-row validation-submit-row">
+                <button class="primary-button" id="validateTestCaseButton" type="submit" disabled>开始用例校验</button>
+                <span class="inline-status" id="validateTestCaseStatus"></span>
+              </div>
             </div>
           </form>
 
@@ -186,6 +216,7 @@
           <table class="data-table test-case-table">
             <thead>
               <tr>
+                <th>序号</th>
                 <th>用例编号</th>
                 <th>用例标题</th>
                 <th>平台订单号</th>
@@ -300,9 +331,33 @@
           <label for="recordTestCasePlatformOrderInput">平台订单号</label>
           <input id="recordTestCasePlatformOrderInput" type="text" autocomplete="off" placeholder="请输入平台订单号" required />
         </div>
+        <div class="test-case-filter">
+          <label for="recordTestCaseTitleInput">用例标记 <span class="field-optional">（选填）</span></label>
+          <input id="recordTestCaseTitleInput" type="text" autocomplete="off" placeholder="例如：退款已核销回归" />
+        </div>
         <div class="button-row record-test-case-actions">
           <button class="primary-button" id="recordTestCaseButton" type="submit">录制</button>
           <span class="inline-status" id="recordTestCaseStatus"></span>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="record-test-case-dialog replay-test-case-dialog" id="replayTestCaseDialog" aria-labelledby="replayTestCaseTitle">
+      <form class="record-test-case-form" id="replayTestCaseForm">
+        <div class="record-test-case-head">
+          <h2 id="replayTestCaseTitle">回放测试用例</h2>
+          <button class="dialog-close" id="closeReplayTestCaseButton" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="replay-test-case-summary" id="replayTestCaseSummary"></div>
+        <div class="test-case-filter">
+          <label for="replayTestCaseCompanySelect">回放公司</label>
+          <select id="replayTestCaseCompanySelect"></select>
+          <div class="field-hint">选择本次回放使用的公司数据环境。</div>
+        </div>
+        <div class="replay-test-case-warning">回放会清理并重建该用例对应订单的运行数据，请确认公司选择正确。</div>
+        <div class="button-row record-test-case-actions">
+          <button class="primary-button" id="replayTestCaseButton" type="submit">开始回放</button>
+          <span class="inline-status" id="replayTestCaseStatus"></span>
         </div>
       </form>
     </dialog>
