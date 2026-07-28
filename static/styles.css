@@ -355,7 +355,8 @@ h1 {
 }
 
 .test-case-table {
-  min-width: 1180px;
+  min-width: 1134px;
+  table-layout: fixed;
 }
 
 .test-case-table th,
@@ -363,20 +364,41 @@ h1 {
   white-space: nowrap;
 }
 
+.test-case-table th:nth-child(1),
+.test-case-table td:nth-child(1) {
+  width: 56px;
+}
+
+.test-case-table th:nth-child(2),
+.test-case-table td:nth-child(2) {
+  width: 70px;
+}
+
 .test-case-table th:nth-child(3),
 .test-case-table td:nth-child(3) {
-  min-width: 180px;
+  width: 230px;
 }
 
 .test-case-table th:nth-child(4),
 .test-case-table td:nth-child(4) {
-  width: 180px;
-  min-width: 180px;
+  width: 192px;
 }
 
 .test-case-table th:nth-child(5),
 .test-case-table td:nth-child(5) {
-  width: 100px;
+  width: 90px;
+}
+
+.test-case-table th:nth-child(6),
+.test-case-table td:nth-child(6),
+.test-case-table th:nth-child(7),
+.test-case-table td:nth-child(7) {
+  width: 178px;
+}
+
+.test-case-table th:nth-child(8),
+.test-case-table td:nth-child(8) {
+  width: 140px;
 }
 
 .test-case-empty {
@@ -445,14 +467,17 @@ h1 {
 }
 
 .test-case-title-cell {
+  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 8px;
 }
 
 .test-case-title-cell span {
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -480,10 +505,17 @@ h1 {
 }
 
 .test-case-status-cell {
+  position: relative;
   display: flex;
   align-items: center;
-  min-width: 100px;
-  gap: 8px;
+  min-width: 0;
+}
+
+.test-case-title-cell .test-case-title-edit,
+.test-case-status-cell .test-case-title-edit {
+  position: absolute;
+  right: 0;
+  background: var(--surface);
 }
 
 .test-case-status-editor {
