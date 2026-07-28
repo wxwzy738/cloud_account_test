@@ -476,9 +476,8 @@ h1 {
 .test-case-title-cell span {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .test-case-title-edit {
