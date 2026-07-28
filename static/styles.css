@@ -355,12 +355,30 @@ h1 {
 }
 
 .test-case-table {
-  min-width: 920px;
+  min-width: 1180px;
 }
 
 .test-case-table th:nth-child(-n + 2),
 .test-case-table td:nth-child(-n + 2) {
   white-space: nowrap;
+}
+
+.test-case-table th:nth-child(3),
+.test-case-table td:nth-child(3) {
+  width: 180px;
+  min-width: 180px;
+}
+
+.test-case-table th:nth-child(4),
+.test-case-table td:nth-child(4) {
+  width: 180px;
+  min-width: 180px;
+  white-space: nowrap;
+}
+
+.test-case-table th:nth-child(5),
+.test-case-table td:nth-child(5) {
+  width: 100px;
 }
 
 .test-case-empty {
@@ -431,8 +449,13 @@ h1 {
 .test-case-title-cell {
   display: flex;
   align-items: center;
-  min-width: 150px;
+  min-width: 0;
   gap: 8px;
+}
+
+.test-case-title-cell span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .test-case-title-edit {
@@ -458,7 +481,13 @@ h1 {
   gap: 6px;
 }
 
-.test-case-status-cell,
+.test-case-status-cell {
+  display: flex;
+  align-items: center;
+  min-width: 100px;
+  gap: 8px;
+}
+
 .test-case-status-editor {
   display: flex;
   align-items: center;
