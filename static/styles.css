@@ -358,6 +358,11 @@ h1 {
   min-width: 920px;
 }
 
+.test-case-table th:nth-child(-n + 2),
+.test-case-table td:nth-child(-n + 2) {
+  white-space: nowrap;
+}
+
 .test-case-empty {
   padding: 28px;
   color: var(--muted);
