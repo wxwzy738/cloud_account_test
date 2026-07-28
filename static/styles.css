@@ -358,14 +358,13 @@ h1 {
   min-width: 1180px;
 }
 
-.test-case-table th:nth-child(-n + 2),
-.test-case-table td:nth-child(-n + 2) {
+.test-case-table th,
+.test-case-table td {
   white-space: nowrap;
 }
 
 .test-case-table th:nth-child(3),
 .test-case-table td:nth-child(3) {
-  width: 180px;
   min-width: 180px;
 }
 
@@ -373,7 +372,6 @@ h1 {
 .test-case-table td:nth-child(4) {
   width: 180px;
   min-width: 180px;
-  white-space: nowrap;
 }
 
 .test-case-table th:nth-child(5),
@@ -455,7 +453,7 @@ h1 {
 
 .test-case-title-cell span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .test-case-title-edit {
